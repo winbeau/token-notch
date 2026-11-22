@@ -166,14 +166,16 @@ enum Palette {
     static let grayBar = Color(red: 99 / 255, green: 99 / 255, blue: 102 / 255)   // #636366
     static let divider = Color(red: 72 / 255, green: 72 / 255, blue: 74 / 255)    // #48484A
 
+    /// 各 agent 的颜色取自各家 logo，在黑底上略提亮：
+    /// Claude 用 Anthropic 的珊瑚橙；Codex（OpenAI）和 Grok（xAI）的 logo 都是黑白，分别取近白和中灰；
+    /// Gemini 星芒渐变取偏紫的一端，和 DeepSeek 鲸鱼蓝拉开。
     static func agent(_ a: Agent) -> Color {
         switch a {
-        case .claude: return accent
-        case .codex: return Color(red: 229 / 255, green: 229 / 255, blue: 234 / 255)   // #E5E5EA
-        // 新 agent 选色相与橙、白都拉开，且在黑底上亮度足够
-        case .antigravity: return Color(red: 77 / 255, green: 148 / 255, blue: 1.0)    // #4D94FF 蓝
-        case .grok: return Color(red: 191 / 255, green: 90 / 255, blue: 242 / 255)      // #BF5AF2 紫
-        case .deepseek: return Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255)   // #30D158 绿
+        case .claude: return Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)       // #D97757
+        case .codex: return Color(red: 229 / 255, green: 229 / 255, blue: 234 / 255)       // #E5E5EA
+        case .antigravity: return Color(red: 167 / 255, green: 139 / 255, blue: 250 / 255) // #A78BFA
+        case .grok: return Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)        // #8E8E93
+        case .deepseek: return Color(red: 91 / 255, green: 121 / 255, blue: 1.0)           // #5B79FF
         }
     }
 }
