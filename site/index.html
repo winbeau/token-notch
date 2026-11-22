@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Token Notch — count every token, in the MacBook notch</title>
+<meta name="description" content="A live token meter for Claude Code, Codex, Antigravity, Grok and DeepSeek Harness, in the MacBook notch. Reads local logs only.">
+<meta property="og:title" content="Token Notch">
+<meta property="og:description" content="Count every token. A live meter for your coding agents, in the MacBook notch.">
+<meta property="og:image" content="https://winbeau.github.io/token-notch/assets/og.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f5f2">
+<link rel="icon" type="image/png" href="assets/logo.png">
+<link rel="preload" as="image" href="assets/wallpaper.webp" media="(min-width: 700px)">
+<link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+
+<header class="bar">
+  <a class="brand" href="#top"><img src="assets/logo.png" width="26" height="26" alt=""><span>Token Notch</span></a>
+  <nav>
+    <button class="lang" id="lang" type="button" aria-label="Switch language">中文</button>
+    <a class="link" href="https://github.com/winbeau/token-notch">GitHub</a>
+    <a class="pill" href="https://github.com/winbeau/token-notch/releases/latest" data-i18n="download">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+
+<!-- 首屏：标题 + 可操作的演示 -->
+<section class="hero">
+  <h1 data-i18n="title">Count every token.</h1>
+  <div class="spectrum" aria-hidden="true"><i style="--c:#D97757;--w:46"></i><i style="--c:#E5E5EA;--w:19"></i><i style="--c:#5B79FF;--w:21"></i><i style="--c:#A78BFA;--w:10"></i><i style="--c:#8E8E93;--w:4"></i></div>
+  <p class="lede" data-i18n="lede">A live meter for your coding agents, in the MacBook notch.</p>
+  <ul class="chips" aria-label="Supported agents">
+    <li style="--c:#D97757">Claude Code</li><li style="--c:#B4B4BB">Codex</li><li style="--c:#A78BFA">Antigravity</li><li style="--c:#8E8E93">Grok</li><li style="--c:#5B79FF">DeepSeek Harness</li>
+  </ul>
+  <div class="cta">
+    <a class="btn" href="https://github.com/winbeau/token-notch/releases/latest">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span data-i18n="downloadMac">Download for macOS</span><b id="version">v0.2.0</b>
+    </a>
+  </div>
+
+  <div class="mac" id="mac">
+    <div class="mac-bezel">
+      <div class="screen-wrap" id="screenWrap">
+        <div class="screen" id="screen">
+          <div class="menubar">
+            <div class="mb-left"><b>Token Notch</b><span data-i18n="mb.file">File</span><span data-i18n="mb.edit">Edit</span><span data-i18n="mb.view">View</span><span data-i18n="mb.window">Window</span></div>
+            <div class="mb-right"><span id="clock">Sun 10:41</span></div>
+          </div>
+          <div class="term" aria-hidden="true">
+            <div class="term-bar"><i></i><i></i><i></i><span>atlas-web — claude</span></div>
+            <div class="term-body" id="term"></div>
+          </div>
+          <!-- 灵动岛：尺寸、文案和应用里一致 -->
+          <div class="island" id="island" data-state="idle">
+            <i class="flare l"></i><i class="flare r"></i>
+            <div class="clip">
+              <div class="wings" id="wings"></div>
+              <div class="panel" id="panel"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 三种状态：既是说明，也是切换按钮 -->
+  <div class="states" role="tablist" aria-label="Island state">
+    <button type="button" data-state="idle"><b data-i18n="s.idle">Idle</b><span data-i18n="s.idle.d">Blends into the notch</span></button>
+    <button type="button" data-state="active"><b data-i18n="s.active">Agent running</b><span data-i18n="s.active.d">Agent · live tok/s · today</span></button>
+    <button type="button" data-state="expanded"><b data-i18n="s.expanded">Hover</b><span data-i18n="s.expanded.d">Overview · Per agent · Details</span></button>
+  </div>
+  <p class="note" data-i18n="note">Try it: hover the notch, switch tabs and ranges. All numbers here are demo data.</p>
+</section>
+
+<!-- 统计范围：agent × 指标 -->
+<section class="block" id="coverage">
+  <header><p class="label" data-i18n="cov.label">Coverage</p><h2 data-i18n="cov.title">What it counts</h2></header>
+  <div class="matrix-wrap">
+    <table class="matrix">
+      <thead><tr>
+        <th></th>
+        <th data-i18n="m.tokens">Tokens</th><th data-i18n="m.cache">Cache</th><th data-i18n="m.cost">Cost</th><th>tok/s</th>
+        <th data-i18n="m.edits">Edits</th><th data-i18n="m.sub">Subagents</th><th data-i18n="m.img">Images</th>
+      </tr></thead>
+      <tbody>
+        <tr style="--c:#D97757"><th>Claude Code<code>~/.claude/projects</code></th><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td></tr>
+        <tr style="--c:#B4B4BB"><th>Codex<code>~/.codex/sessions</code></th><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td></td><td class="y"></td></tr>
+        <tr style="--c:#A78BFA"><th>Antigravity<code>~/.gemini/antigravity</code></th><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td></tr>
+        <tr style="--c:#8E8E93"><th>Grok<code>~/.grok/sessions</code></th><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td></td><td></td><td></td></tr>
+        <tr style="--c:#5B79FF"><th>DeepSeek Harness<code>~/.dsh/sessions</code></th><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td><td class="y"></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="foot-notes">
+    <li><b data-i18n="m.cost">Cost</b><span data-i18n="fn.cost">estimate from a price table · <code>~/.tokens/pricing.json</code></span></li>
+    <li><b data-i18n="m.edits">Edits</b><span data-i18n="fn.edits">per change: <code>max(+, −)</code> lines</span></li>
+    <li><b data-i18n="fn.range.t">Ranges</b><span data-i18n="fn.range">Today · 7 days · 30 days · All time</span></li>
+  </ul>
+</section>
+
+<!-- 数据来源：一张流程图 -->
+<section class="block" id="flow">
+  <header><p class="label" data-i18n="flow.label">Data flow</p><h2 data-i18n="flow.title">Where numbers come from</h2></header>
+  <div class="flow">
+    <div class="node">
+      <span class="step" data-i18n="flow.1">Agent logs</span>
+      <code>~/.claude <br>~/.codex <br>~/.gemini <br>~/.grok <br>~/.dsh</code>
+    </div>
+    <i class="wire"></i>
+    <div class="node">
+      <span class="step" data-i18n="flow.2">Parser</span>
+      <p data-i18n="flow.2.d">FSEvents <br>appended bytes only</p>
+    </div>
+    <i class="wire"></i>
+    <div class="node">
+      <span class="step">tokens.db</span>
+      <p data-i18n="flow.3.d">SQLite <br><code>~/.tokens</code></p>
+    </div>
+    <i class="wire"></i>
+    <div class="node dark">
+      <span class="step" data-i18n="flow.4">Notch</span>
+      <div class="notch-glyph"><i></i></div>
+    </div>
+  </div>
+  <p class="local"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2M3.5 7h9v6.5h-9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span data-i18n="flow.local">Everything stays on this Mac. No account, no network.</span></p>
+</section>
+
+<!-- 安装 -->
+<section class="block install" id="install">
+  <header><p class="label" data-i18n="ins.label">Install</p><h2 data-i18n="ins.title">Get it</h2></header>
+  <div class="install-grid">
+    <div class="get">
+      <img src="assets/logo.png" width="72" height="72" alt="Token Notch logo">
+      <a class="btn" href="https://github.com/winbeau/token-notch/releases/latest">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="downloadMac">Download for macOS</span>
+      </a>
+      <ul class="meta"><li>macOS 14+</li><li>Apple silicon · Intel</li><li>MIT</li></ul>
+    </div>
+    <ol class="steps">
+      <li data-i18n="ins.1">Unzip</li>
+      <li data-i18n="ins.2">Move to <code>/Applications</code></li>
+      <li><span data-i18n="ins.3">First launch: right-click → Open, or</span>
+        <div class="cmd"><code id="cmd">xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"</code><button type="button" id="copy" data-i18n="copy">Copy</button></div>
+      </li>
+    </ol>
+  </div>
+  <p class="aside" data-i18n="ins.nonotch">No notch? It draws one under the menu bar.</p>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="spectrum" aria-hidden="true"><i style="--c:#D97757;--w:46"></i><i style="--c:#E5E5EA;--w:19"></i><i style="--c:#5B79FF;--w:21"></i><i style="--c:#A78BFA;--w:10"></i><i style="--c:#8E8E93;--w:4"></i></div>
+  <span>Token Notch · MIT</span>
+  <span class="foot-links">
+    <a href="https://github.com/winbeau/token-notch">GitHub</a>
+    <a href="https://github.com/winbeau/token-notch/releases" data-i18n="foot.releases">Releases</a>
+    <a href="https://github.com/winbeau/token-notch/issues" data-i18n="foot.issues">Issues</a>
+  </span>
+</footer>
+
+<script src="app.js?v=5" defer></script>
+</body>
+</html>

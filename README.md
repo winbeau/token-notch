@@ -18,7 +18,7 @@
 [![Grok](https://img.shields.io/badge/Grok-8E8E93?logo=x&logoColor=white)](#supported-agents)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-5B79FF)](#supported-agents)
 
-English · [简体中文](README.zh-CN.md)
+**[Website & live demo](https://winbeau.github.io/token-notch/)** · English · [简体中文](README.zh-CN.md)
 
 <img src="docs/images/demo.gif" width="880" alt="Token Notch demo: wings appear while agents run, hover to expand the overview, agent and details pages">
 
