@@ -55,6 +55,25 @@ public struct UsageEvent: Sendable, Equatable {
     }
 }
 
+/// 一次代码编辑（一次工具调用）。按键去重，重读日志不会重复计数。
+public struct EditEvent: Sendable, Equatable {
+    public var key: String
+    public var agent: Agent
+    public var ts: Int64
+    public var cwd: String
+    public var session: String
+    public var change: EditChange
+
+    public init(key: String, agent: Agent, ts: Int64, cwd: String, session: String, change: EditChange) {
+        self.key = key
+        self.agent = agent
+        self.ts = ts
+        self.cwd = cwd
+        self.session = session
+        self.change = change
+    }
+}
+
 public struct TokenTotals: Sendable, Equatable {
     public var input: Int64 = 0
     public var cacheRead: Int64 = 0

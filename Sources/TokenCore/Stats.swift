@@ -40,6 +40,8 @@ public struct AgentStat: Sendable, Identifiable {
     public var totals: TokenTotals
     /// 子代理（Claude sidechain）产生的 token。
     public var subagentTokens: Int64
+    /// 代码编辑行数（每处改动 max(新增, 删除) 之和）。
+    public var editLines: Int64 = 0
 
     public var subagentShare: Double? {
         totals.total > 0 ? Double(subagentTokens) / Double(totals.total) : nil
@@ -59,6 +61,7 @@ public struct ProjectStat: Sendable, Identifiable {
     public var name: String
     public var perAgent: [Agent: Int64]
     public var cost: Double
+    public var editLines: Int64 = 0
     public var total: Int64 { perAgent.values.reduce(0, +) }
 }
 
@@ -71,6 +74,9 @@ public struct RangeStats: Sendable {
     public var models: [ModelStat]          // 按总量降序
     public var daily: [DayStat]             // startDay…endDay 连续，缺的天补 0
     public var projects: [ProjectStat]      // 按总量降序
+
+    /// 全部 agent 的编辑行数合计。
+    public var editLines: Int64 { agents.reduce(0) { $0 + $1.editLines } }
 
     public var dayCount: Int { max(1, daily.count) }
 
@@ -186,7 +192,18 @@ public struct StatsEngine: Sendable {
             agentSub[agent, default: 0] += row[6].int
         }
         models.sort { $0.totals.total > $1.totals.total }
-        let agents = agentTotals.map { AgentStat(agent: $0.key, totals: $0.value, subagentTokens: agentSub[$0.key] ?? 0) }
+        // 编辑行数（只挂到有用量的 agent 上）
+        var agentEdits: [Agent: Int64] = [:]
+        var projectEdits: [String: Int64] = [:]
+        for row in try store.db.query("""
+            SELECT agent, cwd, SUM(lines) FROM edits WHERE day >= ? AND day <= ? GROUP BY agent, cwd
+            """, bounds) {
+            guard let a = Agent(rawValue: row[0].text) else { continue }
+            agentEdits[a, default: 0] += row[2].int
+            projectEdits[row[1].text, default: 0] += row[2].int
+        }
+        let agents = agentTotals.map { AgentStat(agent: $0.key, totals: $0.value, subagentTokens: agentSub[$0.key] ?? 0,
+                                                 editLines: agentEdits[$0.key] ?? 0) }
             .sorted { $0.totals.total > $1.totals.total }
         let all = agents.reduce(TokenTotals()) { $0 + $1.totals }
 
@@ -217,7 +234,8 @@ public struct StatsEngine: Sendable {
         }
         let names = Self.displayNames(for: Array(proj.keys))
         let projects = proj.map { ProjectStat(cwd: $0.key, name: names[$0.key] ?? $0.key,
-                                              perAgent: $0.value.perAgent, cost: $0.value.cost) }
+                                              perAgent: $0.value.perAgent, cost: $0.value.cost,
+                                              editLines: projectEdits[$0.key] ?? 0) }
             .sorted { $0.total > $1.total }
 
         return RangeStats(range: r, startDay: start, endDay: today, totals: all,

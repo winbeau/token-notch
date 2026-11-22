@@ -24,20 +24,18 @@ struct OverviewPage: View {
         let today = model.snapshot.live.values.reduce(Int64(0)) { $0 + $1.today }
 
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("合计 token · \(rangeTitle(s))").font(.system(size: 12)).foregroundStyle(Palette.text2)
+            VStack(alignment: .leading, spacing: 2) {
+                // 标题单独一行，不和右侧指标抢宽度
+                Text("合计 token · \(rangeTitle(s))").font(.system(size: 12)).foregroundStyle(Palette.text2)
+                HStack(alignment: .bottom) {
                     Text(TokenFormat.compact(t.total))
                         .font(.system(size: 46, weight: .semibold)).tracking(-1)
-                }
-                Spacer()
-                HStack(spacing: 24) {
-                    if model.range != .today { Metric(label: "今日", value: TokenFormat.compact(today)) }
-                    Metric(label: "缓存命中", value: TokenFormat.percent(t.cacheHitRate))
-                    Metric(label: "输出", value: TokenFormat.compact(t.output))
-                    Metric(label: "实时合计", value: TokenFormat.speed(model.snapshot.liveTokPerSec), color: Palette.accent)
+                        .lineLimit(1).fixedSize()
+                    Spacer(minLength: 12)
+                    metrics(t: t, s: s, today: today)
                 }
             }
+
 
             if !s.agents.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -72,6 +70,16 @@ struct OverviewPage: View {
             }
 
             ModelTable(stats: s)
+        }
+    }
+
+    func metrics(t: TokenTotals, s: RangeStats, today: Int64) -> some View {
+        HStack(spacing: 22) {
+            if model.range != .today { Metric(label: "今日", value: TokenFormat.compact(today)) }
+            Metric(label: "缓存命中", value: TokenFormat.percent(t.cacheHitRate))
+            Metric(label: "输出", value: TokenFormat.compact(t.output))
+            Metric(label: "编辑行数", value: TokenFormat.lines(s.editLines))
+            Metric(label: "实时合计", value: TokenFormat.speed(model.snapshot.liveTokPerSec), color: Palette.accent)
         }
     }
 
@@ -191,7 +199,7 @@ struct AgentPage: View {
             HStack(spacing: 10) {
                 StatCell(label: "缓存命中", value: TokenFormat.percent(t.cacheHitRate))
                 StatCell(label: "输出", value: TokenFormat.compact(t.output))
-                StatCell(label: "缓存写入", value: TokenFormat.compact(t.cacheWrite))
+                StatCell(label: "编辑行数", value: TokenFormat.lines(a?.editLines ?? 0))
                 StatCell(label: "子代理占比", value: TokenFormat.percent(a?.subagentShare))
             }
 

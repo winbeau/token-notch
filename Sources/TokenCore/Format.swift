@@ -12,6 +12,17 @@ public enum TokenFormat {
         return String(format: "%.2f%@", x, unit)
     }
 
+    /// 行数：不到一万显示完整数字（带千分位），再大用 K/M。
+    public static func lines(_ n: Int64) -> String {
+        if n < 10_000 {
+            let f = NumberFormatter()
+            f.numberStyle = .decimal
+            f.locale = Locale(identifier: "en_US")
+            return f.string(from: NSNumber(value: n)) ?? String(n)
+        }
+        return compact(n)
+    }
+
     public static func percent(_ r: Double?, digits: Int = 1) -> String {
         guard let r else { return "—" }
         if r > 0, r < 0.001 { return "<0.1%" }

@@ -252,6 +252,8 @@ struct Metric: View {
             Text(label).font(.system(size: 12)).foregroundStyle(Palette.text2)
             Text(value).font(.system(size: 20, weight: .semibold)).foregroundStyle(color)
         }
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 

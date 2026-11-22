@@ -23,7 +23,15 @@ public struct LogSource: Sendable {
 public struct IngestResult: Sendable {
     public var filesRead = 0
     public var events = 0
+    public var edits = 0
     public var touchedAgents: Set<Agent> = []
+
+    mutating func add(_ n: (events: Int, edits: Int), agent: Agent) {
+        filesRead += 1
+        events += n.events
+        edits += n.edits
+        if n.events + n.edits > 0 { touchedAgents.insert(agent) }
+    }
 }
 
 /// 把日志增量导入 Store。
@@ -61,10 +69,7 @@ public final class Ingestor: @unchecked Sendable {
                       let size = (attrs[.size] as? NSNumber)?.int64Value else { continue }
                 let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
                 if let c = cursors[path], c.offset == size, c.mtime == mtime { continue }
-                let n = try ingestFile(path, agent: source.agent)
-                result.filesRead += 1
-                result.events += n
-                if n > 0 { result.touchedAgents.insert(source.agent) }
+                result.add(try ingestFile(path, agent: source.agent), agent: source.agent)
             }
         }
         return result
@@ -76,10 +81,7 @@ public final class Ingestor: @unchecked Sendable {
         var result = IngestResult()
         for path in Set(paths.map(Self.canonical)) where path.hasSuffix(".jsonl") {
             guard let agent = agent(for: path), FileManager.default.fileExists(atPath: path) else { continue }
-            let n = try ingestFile(path, agent: agent)
-            result.filesRead += 1
-            result.events += n
-            if n > 0 { result.touchedAgents.insert(agent) }
+            result.add(try ingestFile(path, agent: agent), agent: agent)
         }
         return result
     }
@@ -103,15 +105,15 @@ public final class Ingestor: @unchecked Sendable {
         return out
     }
 
-    func ingestFile(_ path: String, agent: Agent) throws -> Int {
+    func ingestFile(_ path: String, agent: Agent) throws -> (events: Int, edits: Int) {
         switch agent {
         case .claude: return try ingest(path, agent: agent, parser: ClaudeParser.self)
         case .codex: return try ingest(path, agent: agent, parser: CodexParser.self)
         }
     }
 
-    private func ingest<P: LogParser>(_ path: String, agent: Agent, parser: P.Type) throws -> Int {
-        guard let fh = FileHandle(forReadingAtPath: path) else { return 0 }
+    private func ingest<P: LogParser>(_ path: String, agent: Agent, parser: P.Type) throws -> (events: Int, edits: Int) {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return (0, 0) }
         defer { try? fh.close() }
         let size = Int64(try fh.seekToEnd())
         let mtime = ((try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date)?
@@ -128,7 +130,7 @@ public final class Ingestor: @unchecked Sendable {
             try store.save(.init(path: path, agent: agent, offset: offset,
                                  fingerprint: Self.fingerprint(fh, end: offset), mtime: mtime,
                                  state: try? JSONEncoder().encode(p)))
-            return 0
+            return (0, 0)
         }
 
         try fh.seek(toOffset: UInt64(offset))
@@ -146,24 +148,24 @@ public final class Ingestor: @unchecked Sendable {
             }
             consumed = pos
         }
-        guard consumed > 0 else { return 0 }   // 只有半行，等写完
+        guard consumed > 0 else { return (0, 0) }   // 只有半行，等写完
 
-        var events: [UsageEvent] = []
+        var out = ParseOutput()
         let base = data.startIndex
         for r in lines {
-            if let e = p.consume(line: data[(base + r.lowerBound)..<(base + r.upperBound)], path: path) {
-                events.append(e)
-            }
+            p.consume(line: data[(base + r.lowerBound)..<(base + r.upperBound)], path: path, into: &out)
         }
+        P.enrich(&out, path: path)
         let newOffset = offset + Int64(consumed)
         let cursor = Store.Cursor(path: path, agent: agent, offset: newOffset,
                                   fingerprint: Self.fingerprint(fh, end: newOffset), mtime: mtime,
                                   state: try? JSONEncoder().encode(p))
         try store.db.transaction {
-            try store.upsert(events)
+            try store.upsert(out.events)
+            try store.upsert(edits: out.edits)
             try store.save(cursor)
         }
-        return events.count
+        return (out.events.count, out.edits.count)
     }
 
     /// 游标前最多 64 字节的 FNV-1a 指纹。
