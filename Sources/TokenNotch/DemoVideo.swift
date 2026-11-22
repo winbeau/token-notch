@@ -189,10 +189,17 @@ enum DemoVideo {
     }
 
     static func backgroundImage(lang: Lang) -> CGImage? {
+        // 壁纸：`TOKEN_NOTCH_DEMO_WALLPAPER` 指向一张图片时铺满画面，否则用渐变
+        let wallpaper = ProcessInfo.processInfo.environment["TOKEN_NOTCH_DEMO_WALLPAPER"].flatMap { NSImage(contentsOfFile: $0) }
         let view = ZStack(alignment: .top) {
-            LinearGradient(colors: [Color(red: 0.13, green: 0.16, blue: 0.27), Color(red: 0.30, green: 0.24, blue: 0.40),
-                                    Color(red: 0.55, green: 0.38, blue: 0.42)],
-                           startPoint: .top, endPoint: .bottom)
+            if let wallpaper {
+                Image(nsImage: wallpaper).resizable().scaledToFill()
+                    .frame(width: canvas.width, height: canvas.height).clipped()
+            } else {
+                LinearGradient(colors: [Color(red: 0.13, green: 0.16, blue: 0.27), Color(red: 0.30, green: 0.24, blue: 0.40),
+                                        Color(red: 0.55, green: 0.38, blue: 0.42)],
+                               startPoint: .top, endPoint: .bottom)
+            }
             HStack(spacing: 18) {
                 Text("Token Notch").fontWeight(.semibold)
                 Text(lang == .en ? "File" : "文件")
