@@ -277,12 +277,21 @@ struct Metric: View {
 struct StatCell: View {
     var label: String
     var value: String
+    /// 数字后面的小号说明（单位、次要数字），和数字同一行
+    var detail: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.system(size: 11)).foregroundStyle(Palette.text2)
-            Text(value).font(.system(size: 17, weight: .semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value).font(.system(size: 17, weight: .semibold))
+                if !detail.isEmpty {
+                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.text2)
+                }
+            }
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
