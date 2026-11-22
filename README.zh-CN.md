@@ -65,9 +65,13 @@ release 里还有命令行工具 `tokens`，导入日志并打印同样的统计
 
 格式参考了 cc-switch（MIT）的对应解析，并在本机日志上核对过。
 
-- **回填历史**：首次启动全量导入安装前的所有日志（本机五个来源约 20 秒，其中 DeepSeek Harness 解压后约 930MB）；每导完一类 agent 就先刷新一次界面。库版本升级（v2 加编辑、v3 加生图）时会清空游标重读全部日志，用量按键去重不会重复计数。
+- **回填历史**：首次启动全量导入安装前的所有日志（本机五个来源约 20 秒，其中 DeepSeek Harness 解压后约 930MB）；每导完一类 agent 就先刷新一次界面。库版本升级（v2 加编辑、v3 加生图、v4 换编辑行数算法）时会清空游标重读全部日志，用量按键去重不会重复计数。
 - **实时更新**：FSEvents 监听日志目录，每个文件记字节游标只读新增的完整行；文件被改写时按指纹检测并重读，事件按键去重，重读不会重复计数。每分钟兜底扫一遍。
-- **编辑行数**：每处改动记 max(新增, 删除) 行——+1−1 记 1，+7−5 与 +5−7 都记 7；一次调用里多处改动（MultiEdit、补丁的多个 hunk）逐处取 max 再相加。字符串替换按行做 LCS diff，每段连续增删算一处；整文件写入全部算新增。来源：Claude 的 Edit / MultiEdit / Write、Codex 的 apply_patch 补丁（新版包在 exec 的 JS 里）、Antigravity 的 edit_file / write_file、DeepSeek Harness 的 edit / write。Claude 和 DSH 要等工具结果没报错才算（被拒绝、匹配失败的不算）。Grok 本机没有编辑工具样本，暂不统计。
+- **编辑行数**：每处改动记 max(新增, 删除) 行——+1−1 记 1，+7−5 与 +5−7 都记 7；一次调用里多处改动（MultiEdit、补丁的多个 hunk）逐处取 max 再相加。按行做 diff，每段连续增删算一处。
+  - **覆盖已有文件**对上一版做 diff，只算改动的行。Claude Code 和 DeepSeek Harness 的工具结果里带原文件或 diff，直接用；Antigravity 的日志没有，解析器记着会话里每个文件最后一次已知的内容（写过的、完整读过的、编辑之后的，只存行哈希）拿来比，从没见过的文件按新建算。
+  - **不计入**：`/tmp`、`/private/tmp`、`/var/folders` 下的文件，各 agent 自己的目录（`~/.claude`、`~/.codex`、`~/.gemini`、`~/.dsh`、`~/.grok`，里面是计划、记忆、草稿）；锁文件、`*.min.js`、`*.min.css`、`*.map`，以及 `node_modules`、`.build`、`__pycache__`、`.venv`、`Pods`、`DerivedData` 下的文件。
+  - 文档（`.md` 等）和代码一样计入。
+  - 来源：Claude 的 Edit / MultiEdit / Write、Codex 的 apply_patch 补丁（新版包在 exec 的 JS 里）、Antigravity 的 edit_file / write_file、DeepSeek Harness 的 edit / write。Claude 和 DSH 要等工具结果没报错才算（被拒绝、匹配失败的不算）。Grok 本机没有编辑工具样本，暂不统计。
 - **生图调用**：本机生图走 `img`（Codex 的 image-relay）或 `imagegen`（Claude Code 技能）命令，统计 agent 在 shell 工具里调用 `img|imagegen generate|edit` 的次数，`--help` / `--dry-run` 不算；记模型（`--model` 或 `*_MODEL=`，默认 gpt-image-2.5-sunburst）和张数（`--n`）。内置 image_gen 工具出现时也计数。
 - **模型别名**：入库时统一，例如 `deepseek-flash` 记为 `deepseek-v4.1-flash`。
 - **口径**：总量 = 新输入 + 缓存读 + 缓存写 + 输出；缓存命中 = 缓存读 ÷（新输入 + 缓存读 + 缓存写）。日期按本地时区。
