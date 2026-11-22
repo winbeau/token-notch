@@ -71,7 +71,7 @@ release 里还有命令行工具 `tokens`，导入日志并打印同样的统计
 - **生图调用**：本机生图走 `img`（Codex 的 image-relay）或 `imagegen`（Claude Code 技能）命令，统计 agent 在 shell 工具里调用 `img|imagegen generate|edit` 的次数，`--help` / `--dry-run` 不算；记模型（`--model` 或 `*_MODEL=`，默认 gpt-image-2.5-sunburst）和张数（`--n`）。内置 image_gen 工具出现时也计数。
 - **模型别名**：入库时统一，例如 `deepseek-flash` 记为 `deepseek-v4.1-flash`。
 - **口径**：总量 = 新输入 + 缓存读 + 缓存写 + 输出；缓存命中 = 缓存读 ÷（新输入 + 缓存读 + 缓存写）。日期按本地时区。
-- **tok/s**：响应的输出 token ÷（响应写入日志时刻 − 上一次用户输入 / 上一次响应时刻）。这是估算：日志里没有真正的生成耗时，Codex 的间隔还包含工具执行时间。实时速度取最近 90 秒。
+- **tok/s**：响应的输出 token ÷（响应写入日志时刻 − 上一次用户输入 / 上一次响应时刻）。Claude 的一条响应在日志里按内容块拆成多行，耗时算到最后一块为止。这是估算：日志里没有真正的生成耗时，Codex 的间隔还包含工具执行时间。实时速度取最近 90 秒。
 - **费用**：按模型计价，默认价格取自 cc-switch（MIT）的预置价格表；`~/.tokens/pricing.json` 可覆盖或补充：
 
   ```json

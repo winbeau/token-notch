@@ -88,9 +88,18 @@ extension Dictionary where Key == String, Value == PendingEdit {
 /// 每条 assistant 行带 `message.usage`；同一响应按内容块拆成多行，usage 相同，
 /// 用 `message.id + requestId` 去重。`input_tokens` 本身就是新输入（不含缓存）。
 /// 编辑来自 assistant 行里的 `tool_use`（Edit / MultiEdit / Write），等对应的 `tool_result` 没报错才算。
+/// 结果行的 `toolUseResult` 带着这次编辑的真实 diff（`structuredPatch`，覆盖写入时还有 `originalFile`），
+/// 有就以它为准：覆盖已有文件只算改动的行，`replace_all` 的多处替换也都能算上。
+///
+/// 生成耗时：从这次请求发出（上一条 user 行）到这条响应**最后一块**内容写完。一条响应的各行时间戳不同，
+/// 每行都按同一个起点算耗时，入库时取最大的那个；只算到第一块的话，短短一句话后面跟一个大文件写入，
+/// 速度会被算成上千 tok/s。
 struct ClaudeParser: LogParser {
     var lastUserTs: Int64?
     var pending: [String: PendingEdit] = [:]
+    /// 正在输出的那条响应和它的起点；响应输出途中插进来的 user 行不改变起点
+    var currentMessage = ""
+    var currentStart: Int64?
 
     private static let usageKey = bytes("\"usage\"")
     private static let userType = bytes("\"type\":\"user\"")
@@ -133,6 +142,10 @@ struct ClaudeParser: LogParser {
 
         let id = (msg["id"] as? String) ?? (obj["uuid"] as? String) ?? "\(ts)"
         let req = (obj["requestId"] as? String) ?? ""
+        if id != currentMessage {
+            currentMessage = id
+            currentStart = lastUserTs
+        }
         let sub = (obj["isSidechain"] as? Bool) ?? path.contains("/subagents/")
         out.events.append(UsageEvent(
             key: "claude:\(id):\(req)",
@@ -146,7 +159,7 @@ struct ClaudeParser: LogParser {
             cacheRead: cacheRead,
             cacheWrite: cacheWrite,
             output: output,
-            genMs: plausibleGap(ts, since: lastUserTs)
+            genMs: plausibleGap(ts, since: currentStart)
         ))
     }
 

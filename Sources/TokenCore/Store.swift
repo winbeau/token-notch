@@ -122,7 +122,8 @@ public final class Store: @unchecked Sendable {
             cache_read  = max(cache_read, excluded.cache_read),
             cache_write = max(cache_write, excluded.cache_write),
             output      = max(output, excluded.output),
-            gen_ms      = COALESCE(gen_ms, excluded.gen_ms)
+            gen_ms      = CASE WHEN excluded.gen_ms IS NULL THEN gen_ms WHEN gen_ms IS NULL THEN excluded.gen_ms
+                               ELSE max(gen_ms, excluded.gen_ms) END
         """)
 
     /// 同一键重复出现时（流式多行、文件被重读）取各字段最大值，所以重放是安全的。
