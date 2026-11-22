@@ -3,7 +3,7 @@ name: Deploy site
 
 on:
   push:
-    branches: [main, feat/layout-site-editcount]   # 合并前先从功能分支部署一次核对，合并前去掉
+    branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
