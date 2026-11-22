@@ -89,7 +89,7 @@ const AGENTS = [
 ];
 const AGENT = Object.fromEntries(AGENTS.map(a => [a.id, a]));
 const PROJECTS = ['atlas-web', 'token-notch', 'ml-pipeline', 'api-gateway', 'ios-client', 'docs-site', 'infra', 'design-tokens', 'billing-svc', 'cli-tools', 'landing'];
-const LIVE = { claude: 128, codex: 46, deepseek: 96, antigravity: 58 };
+const LIVE = { claude: 128, codex: 46 };
 const DAYS = 30;
 
 const days = (() => {
@@ -394,24 +394,17 @@ function scale() {
 }
 new ResizeObserver(scale).observe(wrap);
 
-// 桌面上的几个 agent 窗口（内容是虚构的），和演示视频里的一致。类名：u 提示、d 次要、e 编辑、g 通过、p 普通
+// 桌面底部两角的 agent 窗口（内容是虚构的），和演示视频里的一致；它们只是背景，所以小、淡、滚得慢。
+// 类名：u 提示、d 次要、e 编辑、g 通过、p 普通
 const TERMS = [
-  { id: 'claude', title: 'atlas-web — claude', keep: 6, lines: [
-    ['u', '› add retry with backoff to the uploader'], ['d', '  Read   src/upload/client.ts'], ['e', '  Edit   src/upload/client.ts  +18 −4'],
-    ['e', '  Edit   src/upload/retry.ts   +41'], ['d', '  Bash   npm test -- upload'], ['g', '  ✓ 42 passed (3.1s)'],
-    ['u', '› now cover the timeout path'], ['d', '  Read   src/upload/retry.test.ts'], ['e', '  Edit   src/upload/retry.test.ts  +27 −2'], ['g', '  ✓ 45 passed (3.4s)']] },
-  { id: 'codex', title: 'api-gateway — codex', keep: 5, lines: [
+  { id: 'claude', title: 'atlas-web — claude', keep: 4, lines: [
+    ['u', '› add retry to the uploader'], ['d', '  Read   src/upload/client.ts'], ['e', '  Edit   src/upload/client.ts  +18 −4'],
+    ['d', '  Bash   npm test -- upload'], ['g', '  ✓ 42 passed (3.1s)'],
+    ['u', '› now cover the timeout path'], ['e', '  Edit   src/upload/retry.test.ts  +27'], ['g', '  ✓ 45 passed (3.4s)']] },
+  { id: 'codex', title: 'api-gateway — codex', keep: 4, lines: [
     ['u', '› rate-limit the /export endpoint'], ['d', '• Ran rg "export" src/routes'], ['p', '• Edited src/routes/export.ts (+24 −3)'],
-    ['p', '• Edited src/limits.ts (+31)'], ['d', '• Ran pnpm test export'], ['g', '  18 passed'],
-    ['u', '› add a 429 response to the OpenAPI spec'], ['p', '• Edited openapi.yaml (+12)']] },
-  { id: 'deepseek', title: 'ml-pipeline — dsh', keep: 5, lines: [
-    ['u', '> profile the tokenizer stage'], ['d', '[read] pipeline/tokenize.py'], ['d', '[bash] python -m cProfile -s cumtime'],
-    ['e', '[edit] pipeline/tokenize.py +12 −9'], ['d', '[bash] pytest -q tests/tokenize'], ['g', '31 passed in 2.8s'],
-    ['u', '> batch the vocab lookups'], ['e', '[edit] pipeline/vocab.py +22 −15']] },
-  { id: 'antigravity', title: 'ios-client — Antigravity', keep: 5, lines: [
-    ['u', 'Add an offline cache to the feed'], ['g', '✓ Read FeedStore.swift'], ['g', '✓ Read FeedView.swift'],
-    ['e', '✓ Edit FeedStore.swift  +36 −8'], ['e', '✓ Write FeedCache.swift  +74'], ['d', '● Running xcodebuild test'],
-    ['g', '✓ 23 tests passed'], ['u', 'Evict entries older than 7 days']] },
+    ['d', '• Ran pnpm test export'], ['g', '  18 passed'],
+    ['u', '› document the 429 response'], ['p', '• Edited openapi.yaml (+12)']] },
 ];
 const desk = $('#desk');
 TERMS.forEach((w, i) => {
@@ -430,7 +423,7 @@ TERMS.forEach((w, i) => {
   };
   for (let k = 0; k < w.keep; k++) push();
   // 几个窗口错开滚动
-  setTimeout(() => setInterval(() => { if (!document.hidden && heroVisible) push(); }, 900), i * 230);
+  setTimeout(() => setInterval(() => { if (!document.hidden && heroVisible) push(); }, 1700), i * 850);
 });
 
 // ---------------------------------------------------------------- 语言

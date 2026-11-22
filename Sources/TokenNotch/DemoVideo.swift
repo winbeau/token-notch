@@ -288,7 +288,7 @@ enum DemoVideo {
 
     static func write(_ img: CGImage, to path: String, jpeg: Bool) {
         let rep = NSBitmapImageRep(cgImage: img)
-        let data = jpeg ? rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
+        let data = jpeg ? rep.representation(using: .jpeg, properties: [.compressionFactor: 0.98])
                         : rep.representation(using: .png, properties: [:])
         try? data?.write(to: URL(fileURLWithPath: path))
     }
