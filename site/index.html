@@ -13,7 +13,7 @@
 <meta name="theme-color" content="#f6f5f2">
 <link rel="icon" type="image/png" href="assets/logo.png">
 <link rel="preload" as="image" href="assets/wallpaper.webp" media="(min-width: 700px)">
-<link rel="stylesheet" href="styles.css?v=7">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
 
@@ -51,10 +51,8 @@
             <div class="mb-left"><b>Token Notch</b><span data-i18n="mb.file">File</span><span data-i18n="mb.edit">Edit</span><span data-i18n="mb.view">View</span><span data-i18n="mb.window">Window</span></div>
             <div class="mb-right"><span id="clock">Sun 10:41</span></div>
           </div>
-          <div class="term" aria-hidden="true">
-            <div class="term-bar"><i></i><i></i><i></i><span>atlas-web — claude</span></div>
-            <div class="term-body" id="term"></div>
-          </div>
+          <!-- 桌面上的 agent 窗口，由脚本填充 -->
+          <div id="desk" aria-hidden="true"></div>
           <!-- 灵动岛：尺寸、文案和应用里一致 -->
           <div class="island" id="island" data-state="idle">
             <i class="flare l"></i><i class="flare r"></i>
@@ -165,6 +163,6 @@
   </span>
 </footer>
 
-<script src="app.js?v=7" defer></script>
+<script src="app.js?v=8" defer></script>
 </body>
 </html>

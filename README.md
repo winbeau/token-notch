@@ -42,12 +42,12 @@
 
 <table>
 <tr>
-<td><img src="docs/images/overview.png" alt="Overview page"></td>
-<td><img src="docs/images/agent.png" alt="Agent page"></td>
+<td><img src="docs/images/overview.jpg" alt="Overview page"></td>
+<td><img src="docs/images/agent.jpg" alt="Agent page"></td>
 </tr>
 <tr>
-<td><img src="docs/images/detail.png" alt="Details page"></td>
-<td><img src="docs/images/wings.png" alt="Wings while an agent is running"></td>
+<td><img src="docs/images/detail.jpg" alt="Details page"></td>
+<td><img src="docs/images/wings.jpg" alt="Wings while an agent is running"></td>
 </tr>
 </table>
 
