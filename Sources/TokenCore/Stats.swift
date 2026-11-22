@@ -42,10 +42,20 @@ public struct AgentStat: Sendable, Identifiable {
     public var subagentTokens: Int64
     /// 代码编辑行数（每处改动 max(新增, 删除) 之和）。
     public var editLines: Int64 = 0
+    /// 生图调用次数与张数。
+    public var imageCalls: Int64 = 0
+    public var images: Int64 = 0
 
     public var subagentShare: Double? {
         totals.total > 0 ? Double(subagentTokens) / Double(totals.total) : nil
     }
+}
+
+public struct ImageModelStat: Sendable, Identifiable {
+    public var id: String { model }
+    public var model: String
+    public var calls: Int64
+    public var images: Int64
 }
 
 public struct DayStat: Sendable, Identifiable {
@@ -74,9 +84,12 @@ public struct RangeStats: Sendable {
     public var models: [ModelStat]          // 按总量降序
     public var daily: [DayStat]             // startDay…endDay 连续，缺的天补 0
     public var projects: [ProjectStat]      // 按总量降序
+    public var imageModels: [ImageModelStat] = []   // 生图按模型，按调用次数降序
 
     /// 全部 agent 的编辑行数合计。
     public var editLines: Int64 { agents.reduce(0) { $0 + $1.editLines } }
+    public var imageCalls: Int64 { imageModels.reduce(0) { $0 + $1.calls } }
+    public var images: Int64 { imageModels.reduce(0) { $0 + $1.images } }
 
     public var dayCount: Int { max(1, daily.count) }
 
@@ -202,8 +215,27 @@ public struct StatsEngine: Sendable {
             agentEdits[a, default: 0] += row[2].int
             projectEdits[row[1].text, default: 0] += row[2].int
         }
+        // 生图调用
+        var agentImages: [Agent: (calls: Int64, images: Int64)] = [:]
+        var imageModels: [ImageModelStat] = []
+        for row in try store.db.query("""
+            SELECT agent, model, COUNT(*), SUM(count) FROM images WHERE day >= ? AND day <= ? GROUP BY agent, model
+            """, bounds) {
+            guard let a = Agent(rawValue: row[0].text) else { continue }
+            agentImages[a, default: (0, 0)].calls += row[2].int
+            agentImages[a, default: (0, 0)].images += row[3].int
+            if let i = imageModels.firstIndex(where: { $0.model == row[1].text }) {
+                imageModels[i].calls += row[2].int
+                imageModels[i].images += row[3].int
+            } else {
+                imageModels.append(ImageModelStat(model: row[1].text, calls: row[2].int, images: row[3].int))
+            }
+        }
+        imageModels.sort { $0.calls > $1.calls }
         let agents = agentTotals.map { AgentStat(agent: $0.key, totals: $0.value, subagentTokens: agentSub[$0.key] ?? 0,
-                                                 editLines: agentEdits[$0.key] ?? 0) }
+                                                 editLines: agentEdits[$0.key] ?? 0,
+                                                 imageCalls: agentImages[$0.key]?.calls ?? 0,
+                                                 images: agentImages[$0.key]?.images ?? 0) }
             .sorted { $0.totals.total > $1.totals.total }
         let all = agents.reduce(TokenTotals()) { $0 + $1.totals }
 
@@ -239,7 +271,7 @@ public struct StatsEngine: Sendable {
             .sorted { $0.total > $1.total }
 
         return RangeStats(range: r, startDay: start, endDay: today, totals: all,
-                          agents: agents, models: models, daily: daily, projects: projects)
+                          agents: agents, models: models, daily: daily, projects: projects, imageModels: imageModels)
     }
 
     func live(now: Date, today: String, activity: [Agent: Date]) throws -> [Agent: LiveStat] {

@@ -107,7 +107,7 @@ final class MigrationTests: XCTestCase {
             """)
         }
         let store = try Store(path: path)
-        XCTAssertEqual(store.db.userVersion, 2)
+        XCTAssertEqual(store.db.userVersion, Store.schemaVersion)
         XCTAssertEqual(try store.allCursors().count, 0)
         XCTAssertEqual(try store.editCount(), 0)
     }

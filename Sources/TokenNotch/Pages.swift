@@ -201,6 +201,10 @@ struct AgentPage: View {
                 StatCell(label: tr.output, value: TokenFormat.compact(t.output))
                 StatCell(label: tr.editLines, value: TokenFormat.lines(a?.editLines ?? 0))
                 StatCell(label: tr.subagentShare, value: TokenFormat.percent(a?.subagentShare))
+                // 只有用过生图的 agent 才多出这一格
+                if (model.snapshot.stats(.all).agent(agent)?.imageCalls ?? 0) > 0 {
+                    StatCell(label: tr.imageCalls, value: tr.imageCallsValue(a?.imageCalls ?? 0, a?.images ?? 0))
+                }
             }
 
             HStack(alignment: .top, spacing: 28) {
@@ -284,6 +288,18 @@ struct DetailPage: View {
                         }
                         .font(.system(size: 12))
                         Track(fraction: a.totals.cacheHitRate ?? 0, color: Palette.agent(a.agent))
+                    }
+                }
+                if s.imageCalls > 0 {
+                    Rectangle().fill(Palette.track).frame(height: 1)
+                    Text(tr.imageTitle(s.imageCalls, s.images)).font(.system(size: 11)).foregroundStyle(Palette.text2)
+                    ForEach(s.imageModels.prefix(3)) { m in
+                        HStack {
+                            Text(m.model).foregroundStyle(Color(white: 0.9)).lineLimit(1)
+                            Spacer()
+                            Text(tr.imageModelRow(m.calls)).foregroundStyle(Palette.text2)
+                        }
+                        .font(.system(size: 12))
                     }
                 }
             }

@@ -199,3 +199,45 @@ final class AgentParserTests: XCTestCase {
         XCTAssertEqual(TokenFormat.modelName("deepseek-v4-pro"), "DeepSeek V4 Pro")
     }
 }
+
+final class ImageCallTests: XCTestCase {
+    func testFindCalls() {
+        let calls = ImageCalls.find(in: "mkdir -p out; img generate --model gpt-image-2 --n 3 --prompt 'a; b' && imagegen edit --image x.png --prompt y")
+        XCTAssertEqual(calls, [
+            ImageCalls.Call(kind: "generate", model: "gpt-image-2", count: 3),
+            ImageCalls.Call(kind: "edit", model: ImageCalls.defaultModel, count: 1),
+        ])
+        // 帮助、试运行、只是在文本里提到不算
+        XCTAssertTrue(ImageCalls.find(in: "img edit --help | head").isEmpty)
+        XCTAssertTrue(ImageCalls.find(in: "img generate --prompt x --dry-run").isEmpty)
+        XCTAssertTrue(ImageCalls.find(in: "cat SKILL.md; img models").isEmpty)
+        XCTAssertTrue(ImageCalls.find(in: "echo setimg generate").isEmpty)
+        // 环境变量指定模型；JS 里的调用
+        XCTAssertEqual(ImageCalls.find(in: "IMAGE_RELAY_MODEL=gpt-image-2.5-flare img generate --prompt p").first?.model, "gpt-image-2.5-flare")
+        XCTAssertEqual(ImageCalls.find(in: #"tools.exec_command({cmd:"~/.local/bin/img edit --image a.png --prompt 'x'"})"#).first?.kind, "edit")
+    }
+
+    func testClaudeBashAndCodexExec() {
+        var c = ClaudeParser()
+        var out = ParseOutput()
+        let bash = #"{"type":"assistant","timestamp":"2026-11-22T01:00:04.000Z","sessionId":"s","cwd":"/p","message":{"id":"m","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"imagegen generate --prompt cat --n 2"}}],"usage":{"input_tokens":1,"output_tokens":1}}}"#
+        c.consume(line: Data(bash.utf8), path: "/x", into: &out)
+        XCTAssertEqual(out.images.map(\.key), ["claude:tu1:img0"])
+        XCTAssertEqual(out.images.first?.count, 2)
+
+        var x = CodexParser()
+        let exec = #"{"type":"response_item","timestamp":"2026-11-22T01:00:02Z","payload":{"type":"custom_tool_call","status":"completed","call_id":"c9","name":"exec","input":"await Promise.allSettled([tools.exec_command({cmd:\"img generate --model gpt-image-2.5-sunburst --prompt 'a'\"}),tools.exec_command({cmd:\"img generate --prompt 'b'\"})])"}}"#
+        x.consume(line: Data(exec.utf8), path: "/r", into: &out)
+        XCTAssertEqual(out.images.filter { $0.agent == .codex }.count, 2)
+    }
+
+    func testDeepSeekFlashAliasIsMerged() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tn-alias-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try Store(path: dir.appendingPathComponent("t.db").path)
+        try store.upsert([UsageEvent(key: "k", agent: .deepseek, ts: 1_790_000_000_000, model: "deepseek-flash", cwd: "", session: "",
+                                     input: 1, cacheRead: 0, cacheWrite: 0, output: 1)])
+        XCTAssertEqual(try store.db.query("SELECT model FROM events").first?[0].text, "deepseek-v4.1-flash")
+    }
+}

@@ -31,6 +31,7 @@ enum DebugRender {
             ("9-agent-deepseek-all", .expanded, nil, .agent(.deepseek), .all),
             ("10-agent-antigravity-all", .expanded, nil, .agent(.antigravity), .all),
             ("11-agent-grok-all", .expanded, nil, .agent(.grok), .all),
+            ("12-agent-codex-all", .expanded, nil, .agent(.codex), .all),
         ]
         for lang in Lang.allCases {
         for (name, state, active, tab, range) in cases {

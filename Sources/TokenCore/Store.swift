@@ -21,7 +21,14 @@ public final class Store: @unchecked Sendable {
         try migrate()
     }
 
-    static let schemaVersion = 2
+    static let schemaVersion = 3
+
+    /// 同一模型的不同叫法，入库时统一。DeepSeek Harness 记的 deepseek-flash 就是 V4.1 Flash。
+    static let modelAliases: [String: String] = [
+        "deepseek-flash": "deepseek-v4.1-flash",
+    ]
+
+    static func canonicalModel(_ m: String) -> String { modelAliases[m] ?? m }
 
     func migrate() throws {
         let v = db.userVersion
@@ -76,6 +83,28 @@ public final class Store: @unchecked Sendable {
                 // events 是按键幂等 upsert，重读不会重复计数，编辑则借此回填。
                 if v >= 1 { try db.exec("DELETE FROM cursors;") }
             }
+            if v < 3 {
+                // 生图调用：一次 img / imagegen 命令（或内置生图工具）一行
+                try db.exec("""
+                CREATE TABLE IF NOT EXISTS images (
+                    key     TEXT PRIMARY KEY,
+                    agent   TEXT NOT NULL,
+                    ts      INTEGER NOT NULL,
+                    day     TEXT NOT NULL,
+                    cwd     TEXT NOT NULL,
+                    session TEXT NOT NULL,
+                    kind    TEXT NOT NULL,
+                    model   TEXT NOT NULL,
+                    count   INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
+                """)
+                for (from, to) in Self.modelAliases {
+                    try db.run("UPDATE events SET model = ? WHERE model = ?", [.text(to), .text(from)])
+                }
+                // 同上：重读全部日志以回填历史里的生图调用
+                if v >= 1 { try db.exec("DELETE FROM cursors;") }
+            }
             try db.exec("PRAGMA user_version = \(Self.schemaVersion);")
         }
     }
@@ -102,7 +131,7 @@ public final class Store: @unchecked Sendable {
         for e in events {
             try st.bind([
                 .text(e.key), .text(e.agent.rawValue), .int(e.ts), .text(Time.day(ms: e.ts)),
-                .text(e.model), .text(e.cwd), .text(e.session), .int(e.isSubagent ? 1 : 0),
+                .text(Self.canonicalModel(e.model)), .text(e.cwd), .text(e.session), .int(e.isSubagent ? 1 : 0),
                 .int(e.input), .int(e.cacheRead), .int(e.cacheWrite), .int(e.output),
                 e.genMs.map { .int($0) } ?? .null,
             ])
@@ -129,6 +158,30 @@ public final class Store: @unchecked Sendable {
             ])
             _ = try st.step()
         }
+    }
+
+    private lazy var imageStmt: Statement? = try? db.prepare("""
+        INSERT INTO images (key, agent, ts, day, cwd, session, kind, model, count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            kind = excluded.kind, model = excluded.model, count = excluded.count,
+            cwd = CASE WHEN images.cwd = '' THEN excluded.cwd ELSE images.cwd END
+        """)
+
+    func upsert(images: [ImageEvent]) throws {
+        guard !images.isEmpty else { return }
+        guard let st = imageStmt else { throw SQLiteError(message: "images 语句准备失败") }
+        for e in images {
+            try st.bind([
+                .text(e.key), .text(e.agent.rawValue), .int(e.ts), .text(Time.day(ms: e.ts)),
+                .text(e.cwd), .text(e.session), .text(e.kind), .text(e.model), .int(e.count),
+            ])
+            _ = try st.step()
+        }
+    }
+
+    public func imageCount() throws -> Int {
+        Int(try db.query("SELECT COUNT(*) FROM images").first?.first?.int ?? 0)
     }
 
     public func editCount() throws -> Int {
@@ -178,6 +231,6 @@ public final class Store: @unchecked Sendable {
 
     /// 清空全部数据，下次扫描会从头回填。
     public func reset() throws {
-        try db.exec("DELETE FROM events; DELETE FROM edits; DELETE FROM cursors;")
+        try db.exec("DELETE FROM events; DELETE FROM edits; DELETE FROM images; DELETE FROM cursors;")
     }
 }

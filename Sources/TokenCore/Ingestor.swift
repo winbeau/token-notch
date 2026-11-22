@@ -53,13 +53,15 @@ public struct IngestResult: Sendable {
     public var filesRead = 0
     public var events = 0
     public var edits = 0
+    public var images = 0
     public var touchedAgents: Set<Agent> = []
 
-    mutating func add(_ n: (events: Int, edits: Int), agent: Agent) {
+    mutating func add(_ n: (events: Int, edits: Int, images: Int), agent: Agent) {
         filesRead += 1
         events += n.events
         edits += n.edits
-        if n.events + n.edits > 0 { touchedAgents.insert(agent) }
+        images += n.images
+        if n.events + n.edits + n.images > 0 { touchedAgents.insert(agent) }
     }
 }
 
@@ -139,7 +141,7 @@ public final class Ingestor: @unchecked Sendable {
         return out
     }
 
-    func ingestFile(_ path: String, agent: Agent) throws -> (events: Int, edits: Int) {
+    func ingestFile(_ path: String, agent: Agent) throws -> (events: Int, edits: Int, images: Int) {
         switch agent {
         case .claude: return try ingest(path, agent: agent, parser: ClaudeParser.self)
         case .codex: return try ingest(path, agent: agent, parser: CodexParser.self)
@@ -149,8 +151,8 @@ public final class Ingestor: @unchecked Sendable {
         }
     }
 
-    private func ingest<P: LogParser>(_ path: String, agent: Agent, parser: P.Type) throws -> (events: Int, edits: Int) {
-        guard let fh = FileHandle(forReadingAtPath: path) else { return (0, 0) }
+    private func ingest<P: LogParser>(_ path: String, agent: Agent, parser: P.Type) throws -> (events: Int, edits: Int, images: Int) {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return (0, 0, 0) }
         defer { try? fh.close() }
         let size = Int64(try fh.seekToEnd())
         let mtime = ((try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date)?
@@ -167,7 +169,7 @@ public final class Ingestor: @unchecked Sendable {
             try store.save(.init(path: path, agent: agent, offset: offset,
                                  fingerprint: Self.fingerprint(fh, end: offset), mtime: mtime,
                                  state: try? JSONEncoder().encode(p)))
-            return (0, 0)
+            return (0, 0, 0)
         }
 
         try fh.seek(toOffset: UInt64(offset))
@@ -176,7 +178,7 @@ public final class Ingestor: @unchecked Sendable {
         var compressedConsumed: Int?
         if path.hasSuffix(".zstd") {
             guard let n = Zstd.completeFramesLength(data), n > 0,
-                  let plain = Zstd.decompress(data.prefix(n)) else { return (0, 0) }
+                  let plain = Zstd.decompress(data.prefix(n)) else { return (0, 0, 0) }
             compressedConsumed = n
             data = plain
         }
@@ -193,7 +195,7 @@ public final class Ingestor: @unchecked Sendable {
             }
             consumed = pos
         }
-        guard consumed > 0 else { return (0, 0) }   // 只有半行，等写完
+        guard consumed > 0 else { return (0, 0, 0) }   // 只有半行，等写完
 
         var out = ParseOutput()
         let base = data.startIndex
@@ -208,9 +210,10 @@ public final class Ingestor: @unchecked Sendable {
         try store.db.transaction {
             try store.upsert(out.events)
             try store.upsert(edits: out.edits)
+            try store.upsert(images: out.images)
             try store.save(cursor)
         }
-        return (out.events.count, out.edits.count)
+        return (out.events.count, out.edits.count, out.images.count)
     }
 
     /// 游标前最多 64 字节的 FNV-1a 指纹。

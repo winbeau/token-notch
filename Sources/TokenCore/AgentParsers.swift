@@ -81,6 +81,11 @@ struct AntigravityParser: LogParser {
                 }
             case "write_file", "write_to_file":
                 change = EditCount.write(args["Content"] as? String ?? args["CodeContent"] as? String ?? "")
+            case "run_command":
+                out.images += ImageCalls.events(in: args["CommandLine"] as? String ?? "",
+                                                keyPrefix: "antigravity:\(session):\(step):\(i)", agent: .antigravity,
+                                                ts: ts, cwd: "", session: session)
+                continue
             default:
                 continue
             }
@@ -123,7 +128,7 @@ struct AntigravityParser: LogParser {
     ]
 
     static func enrich(_ out: inout ParseOutput, path: String) {
-        guard !out.events.isEmpty || !out.edits.isEmpty else { return }
+        guard !out.events.isEmpty || !out.edits.isEmpty || !out.images.isEmpty else { return }
         let session = session(of: path)
         // …/<根>/brain/<会话>/.system_generated/logs/transcript_full.jsonl
         let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent()
@@ -176,6 +181,7 @@ struct AntigravityParser: LogParser {
             }
         }
         for i in out.edits.indices { out.edits[i].cwd = cwd }
+        for i in out.images.indices { out.images[i].cwd = cwd }
     }
 }
 
@@ -326,6 +332,10 @@ struct DeepSeekParser: LogParser {
                 change = EditCount.replace(old: args["old_string"] as? String ?? "", new: args["new_string"] as? String ?? "")
             case "write":
                 change = EditCount.write(args["content"] as? String ?? "")
+            case "bash":
+                out.images += ImageCalls.events(in: args["command"] as? String ?? "", keyPrefix: "deepseek:\(session):\(callId)",
+                                                agent: .deepseek, ts: ts, cwd: cwd, session: session)
+                return
             default:
                 return
             }

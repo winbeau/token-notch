@@ -4,6 +4,7 @@ import Foundation
 struct ParseOutput {
     var events: [UsageEvent] = []
     var edits: [EditEvent] = []
+    var images: [ImageEvent] = []
 }
 
 /// 增量解析器：逐行喂日志，往 `out` 里追加用量事件和编辑。
@@ -116,7 +117,9 @@ struct ClaudeParser: LogParser {
               let msg = obj["message"] as? [String: Any] else { return }
         let cwd = (obj["cwd"] as? String) ?? ""
         let session = (obj["sessionId"] as? String) ?? ""
-        collectEdits(msg["content"], ts: ts, cwd: cwd, session: session)
+        var images: [ImageEvent] = []
+        collectEdits(msg["content"], ts: ts, cwd: cwd, session: session, images: &images)
+        out.images += images
 
         guard let usage = msg["usage"] as? [String: Any] else { return }
         let model = (msg["model"] as? String) ?? "unknown"
@@ -147,7 +150,8 @@ struct ClaudeParser: LogParser {
         ))
     }
 
-    private mutating func collectEdits(_ content: Any?, ts: Int64, cwd: String, session: String) {
+    private mutating func collectEdits(_ content: Any?, ts: Int64, cwd: String, session: String,
+                                       images: inout [ImageEvent]) {
         guard let blocks = content as? [[String: Any]] else { return }
         for b in blocks where b["type"] as? String == "tool_use" {
             guard let id = b["id"] as? String, let input = b["input"] as? [String: Any] else { continue }
@@ -161,6 +165,10 @@ struct ClaudeParser: LogParser {
                 }
             case "Write":
                 change = EditCount.write(input["content"] as? String ?? "")
+            case "Bash":
+                images += ImageCalls.events(in: input["command"] as? String ?? "", keyPrefix: "claude:\(id)",
+                                            agent: .claude, ts: ts, cwd: cwd, session: session)
+                continue
             default:
                 continue
             }
@@ -206,6 +214,7 @@ struct CodexParser: LogParser {
     var lastMarkTs: Int64?
 
     private static let markers = ["session_meta", "turn_context", "token_count", "user_message", "Begin Patch"].map(bytes)
+        + ImageCalls.markers
 
     init() {}
 
@@ -234,6 +243,15 @@ struct CodexParser: LogParser {
             break
         case "function_call", "custom_tool_call":
             collectPatches(payload, ts: ts, path: path, into: &out)
+            return
+        case "image_generation_call":
+            // 内置生图工具（本机中转下关闭，出现时照样计数）
+            if let ts {
+                let sid = session.isEmpty ? path : session
+                let id = (payload["id"] as? String) ?? "\(ts)"
+                out.images.append(ImageEvent(key: "codex:\(sid):\(id):img0", agent: .codex, ts: ts, cwd: cwd,
+                                             session: sid, kind: "builtin", model: "image_gen", count: 1))
+            }
             return
         default:
             return
@@ -276,6 +294,13 @@ struct CodexParser: LogParser {
         let text = [payload["input"], payload["arguments"]].compactMap { $0 as? String }.joined(separator: "\n")
         let callId = (payload["call_id"] as? String) ?? (payload["id"] as? String) ?? "\(ts)"
         let sid = session.isEmpty ? path : session
+        if ["image_gen", "image_generation"].contains(payload["name"] as? String ?? "") {
+            out.images.append(ImageEvent(key: "codex:\(sid):\(callId):img0", agent: .codex, ts: ts, cwd: cwd,
+                                         session: sid, kind: "builtin", model: "image_gen", count: 1))
+        } else {
+            out.images += ImageCalls.events(in: text, keyPrefix: "codex:\(sid):\(callId)", agent: .codex,
+                                            ts: ts, cwd: cwd, session: sid)
+        }
         for (i, patch) in EditCount.patches(in: text).enumerated() {
             let change = EditCount.patch(patch)
             guard !change.isEmpty else { continue }
