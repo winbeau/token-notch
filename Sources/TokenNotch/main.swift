@@ -46,7 +46,7 @@ import SwiftUI
 
 @MainActor
 func withAnimationIfVisible(_ body: () -> Void) {
-    withAnimation(.easeInOut(duration: 0.3), body)
+    withAnimation(NotchModel.wingsAnimation, body)
 }
 
 MainActor.assumeIsolated {

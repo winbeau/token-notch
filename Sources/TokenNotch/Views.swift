@@ -21,7 +21,9 @@ struct NotchRootView: View {
                 case .active:
                     WingsView(model: model)
                         .padding(.horizontal, flare.width)
-                        .transition(.opacity)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.08)),
+                            removal: .opacity.animation(.easeIn(duration: 0.1))))
                 case .expanded:
                     PanelView(model: model)
                         .padding(.horizontal, flare.width + 28)
@@ -31,7 +33,12 @@ struct NotchRootView: View {
                         .background(HeightReader { h in
                             if abs(model.panelHeight - h) > 0.5 { model.panelHeight = h }
                         })
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                        // 形状先张开，内容稍后淡入；收回时内容先淡出，形状再缩回。
+                        // 内容宽度固定（不随形状插值），形状变形时不会重新布局抖动。
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                                .animation(.easeOut(duration: 0.24).delay(0.12)),
+                            removal: .opacity.animation(.easeIn(duration: 0.09))))
                 }
             }
             .frame(width: body.width + flare.width * 2,
@@ -43,7 +50,7 @@ struct NotchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: state)
+        // 不挂隐式动画：展开 / 收回 / 两翼各自在触发处用不同的曲线（见 NotchModel.openAnimation 等）。
     }
 }
 

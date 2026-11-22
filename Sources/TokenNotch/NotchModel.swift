@@ -53,6 +53,11 @@ final class NotchModel: ObservableObject {
     static let panelWidth: CGFloat = 680
     static let rotateEvery: TimeInterval = 4
 
+    /// 展开：弹簧略慢、轻微回弹；收回：更快、不回弹；两翼出现 / 消失介于两者之间。
+    static let openAnimation = Animation.spring(response: 0.46, dampingFraction: 0.84)
+    static let closeAnimation = Animation.spring(response: 0.3, dampingFraction: 0.96)
+    static let wingsAnimation = Animation.spring(response: 0.4, dampingFraction: 0.88)
+
     private var rotateTimer: Timer?
     private var clock: Timer?
     @Published private(set) var now = Date()
@@ -70,7 +75,17 @@ final class NotchModel: ObservableObject {
         }
         // 活跃窗口按时间过期，即使没有新快照也要重新判定。
         clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let next = Date()
+                // 活跃窗口到期时两翼要收起，带上动画；其余时候静默更新。
+                if self.overrideActive == nil,
+                   self.snapshot.activeAgents(now: self.now).isEmpty != self.snapshot.activeAgents(now: next).isEmpty {
+                    withAnimation(Self.wingsAnimation) { self.now = next }
+                } else {
+                    self.now = next
+                }
+            }
         }
     }
 
