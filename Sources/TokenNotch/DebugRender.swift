@@ -24,8 +24,11 @@ enum DebugRender {
             ("5-detail-all", .expanded, nil, .detail, .all),
             ("6-agent-codex-month", .expanded, nil, .agent(.codex), .month),
             ("7-overview-today", .expanded, nil, .overview, .today),
+            ("8-detail-week", .expanded, nil, .detail, .week),
         ]
+        for lang in Lang.allCases {
         for (name, state, active, tab, range) in cases {
+            model.lang = lang
             model.forced = state
             model.overrideActive = active
             model.tab = tab
@@ -39,8 +42,9 @@ enum DebugRender {
             guard let cg = r.cgImage else { continue }
             let rep = NSBitmapImageRep(cgImage: cg)
             if let png = rep.representation(using: .png, properties: [:]) {
-                try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+                try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(lang.rawValue)-\(name).png"))
             }
+        }
         }
         NSApp.terminate(nil)
     }

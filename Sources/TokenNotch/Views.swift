@@ -45,11 +45,12 @@ struct NotchRootView: View {
                    height: state == .expanded ? nil : body.height, alignment: .top)
             .background(shape.fill(Color.black).opacity(state == .idle && !model.geometry.hasNotch ? 0 : 1))
             .clipShape(shape)
-            .contextMenu { ContextMenuItems() }
+            .contextMenu { ContextMenuItems(model: model) }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+        .environment(\.l10n, model.t)
         // 不挂隐式动画：展开 / 收回 / 两翼各自在触发处用不同的曲线（见 NotchModel.openAnimation 等）。
     }
 }
@@ -66,15 +67,21 @@ struct HeightReader: View {
 }
 
 struct ContextMenuItems: View {
+    @ObservedObject var model: NotchModel
+
     var body: some View {
-        Button("重新统计（清空 ~/.tokens 后回填）") {
+        let t = model.t
+        Button(t.menuRebuild) {
             (NSApp.delegate as? AppDelegate)?.rebuild()
         }
-        Button("在 Finder 中打开 ~/.tokens") {
+        Button(t.menuOpenFolder) {
             NSWorkspace.shared.open(Store.defaultDirectory)
         }
+        Button(t.menuSwitchLanguage) {
+            withAnimation(.easeInOut(duration: 0.2)) { model.lang = model.lang == .zh ? .en : .zh }
+        }
         Divider()
-        Button("退出 Token Notch") { NSApp.terminate(nil) }
+        Button(t.menuQuit) { NSApp.terminate(nil) }
     }
 }
 
@@ -161,7 +168,7 @@ struct PanelView: View {
                     }
                 }
                 Spacer(minLength: 12)
-                RangePicker(selection: $model.range)
+                RangePicker(selection: $model.range, t: model.t)
             }
             .frame(height: 20)
 
@@ -180,9 +187,9 @@ struct PanelView: View {
 
     func title(_ t: PanelTab) -> String {
         switch t {
-        case .overview: return "概览"
-        case .agent(let a): return a.displayName
-        case .detail: return "明细"
+        case .overview: return model.t.overview
+        case .agent(let a): return model.tabs.count > 4 ? a.shortName : a.displayName
+        case .detail: return model.t.detail
         }
     }
 
@@ -217,6 +224,7 @@ struct TabPill: View {
 
 struct RangePicker: View {
     @Binding var selection: TimeRange
+    var t: L10n
 
     var body: some View {
         HStack(spacing: 2) {
@@ -224,7 +232,7 @@ struct RangePicker: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { selection = r }
                 } label: {
-                    Text(r.label)
+                    Text(t.range(r))
                         .font(.system(size: 11))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 1)
@@ -319,6 +327,7 @@ struct DailyBars: View {
     var height: CGFloat = 100
     var showLabels = true
     @State private var hovered: String?
+    @Environment(\.l10n) private var t
 
     var body: some View {
         let values = days.map { d in agent.map { a in d.perAgent[a] ?? 0 } ?? d.total }
@@ -371,8 +380,7 @@ struct DailyBars: View {
             let parts = agent == nil
                 ? Agent.allCases.compactMap { a in d.perAgent[a].map { v in "\(a.shortName) \(TokenFormat.compact(v))" } }
                 : []
-            Text("\(DateLabel.short(d.day)) \(DateLabel.weekday(d.day)) · \(TokenFormat.compact(values[i]))"
-                 + (parts.count > 1 ? "（" + parts.joined(separator: "，") + "）" : ""))
+            Text(t.dayTooltip(d.day, TokenFormat.compact(values[i]), parts: parts))
                 .font(.system(size: 11))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -387,7 +395,7 @@ struct DailyBars: View {
         if days.count <= 14 {
             HStack(spacing: days.count > 14 ? 2 : 8) {
                 ForEach(Array(days.enumerated()), id: \.element.id) { i, d in
-                    Text(i == days.count - 1 ? "今" : DateLabel.weekdayShort(d.day))
+                    Text(i == days.count - 1 ? t.todayShort : t.weekdayShort(d.day))
                         .font(.system(size: 11))
                         .foregroundStyle(i == days.count - 1 ? Palette.text : Palette.text3)
                         .frame(maxWidth: .infinity)
@@ -395,33 +403,14 @@ struct DailyBars: View {
             }
         } else {
             HStack {
-                Text(DateLabel.short(days.first?.day ?? ""))
+                Text(t.shortDate(days.first?.day ?? ""))
                 Spacer()
-                Text(DateLabel.short(days[days.count / 2].day))
+                Text(t.shortDate(days[days.count / 2].day))
                 Spacer()
-                Text("今天")
+                Text(t.todayLabel)
             }
             .font(.system(size: 10))
             .foregroundStyle(Palette.text3)
         }
-    }
-}
-
-enum DateLabel {
-    static let parser: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    static func short(_ day: String) -> String { String(day.suffix(5)) }
-
-    static func weekday(_ day: String) -> String {
-        guard let d = parser.date(from: day) else { return "" }
-        return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][Calendar.current.component(.weekday, from: d) - 1]
-    }
-
-    static func weekdayShort(_ day: String) -> String {
-        String(weekday(day).suffix(1))
     }
 }
