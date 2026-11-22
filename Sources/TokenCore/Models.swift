@@ -3,11 +3,17 @@ import Foundation
 public enum Agent: String, CaseIterable, Sendable, Codable, Hashable {
     case claude
     case codex
+    case antigravity   // Google Antigravity（Gemini）
+    case grok          // Grok Build / Grok App
+    case deepseek      // DeepSeek Harness（DSH）
 
     public var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
+        case .grok: return "Grok"
+        case .deepseek: return "DeepSeek Harness"
         }
     }
 
@@ -15,6 +21,9 @@ public enum Agent: String, CaseIterable, Sendable, Codable, Hashable {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
+        case .grok: return "Grok"
+        case .deepseek: return "DeepSeek"
         }
     }
 }
@@ -52,6 +61,25 @@ public struct UsageEvent: Sendable, Equatable {
         self.cacheWrite = cacheWrite
         self.output = output
         self.genMs = genMs
+    }
+}
+
+/// 一次代码编辑（一次工具调用）。按键去重，重读日志不会重复计数。
+public struct EditEvent: Sendable, Equatable {
+    public var key: String
+    public var agent: Agent
+    public var ts: Int64
+    public var cwd: String
+    public var session: String
+    public var change: EditChange
+
+    public init(key: String, agent: Agent, ts: Int64, cwd: String, session: String, change: EditChange) {
+        self.key = key
+        self.agent = agent
+        self.ts = ts
+        self.cwd = cwd
+        self.session = session
+        self.change = change
     }
 }
 

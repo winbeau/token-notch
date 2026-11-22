@@ -46,12 +46,22 @@ final class NotchModel: ObservableObject {
     @Published var tab: PanelTab = .overview
     @Published var range: TimeRange = .week
     @Published var rotation = 0
+    /// 界面语言，右键菜单切换，存在 UserDefaults。调试可用 `TOKEN_NOTCH_LANG=en` 覆盖。
+    @Published var lang: Lang = ProcessInfo.processInfo.environment["TOKEN_NOTCH_LANG"].flatMap(Lang.init(rawValue:)) ?? .saved {
+        didSet { if DebugRender.directory == nil { UserDefaults.standard.set(lang.rawValue, forKey: Lang.defaultsKey) } }
+    }
+    var t: L10n { L10n(lang: lang) }
     /// 展开面板内容的实际高度（由视图回报），用于热区判定。
     @Published var panelHeight: CGFloat = 420
 
     static let wingWidth: CGFloat = 132
     static let panelWidth: CGFloat = 680
     static let rotateEvery: TimeInterval = 4
+
+    /// 展开：弹簧略慢、轻微回弹；收回：更快、不回弹；两翼出现 / 消失介于两者之间。
+    static let openAnimation = Animation.spring(response: 0.46, dampingFraction: 0.84)
+    static let closeAnimation = Animation.spring(response: 0.3, dampingFraction: 0.96)
+    static let wingsAnimation = Animation.spring(response: 0.4, dampingFraction: 0.88)
 
     private var rotateTimer: Timer?
     private var clock: Timer?
@@ -70,7 +80,17 @@ final class NotchModel: ObservableObject {
         }
         // 活跃窗口按时间过期，即使没有新快照也要重新判定。
         clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let next = Date()
+                // 活跃窗口到期时两翼要收起，带上动画；其余时候静默更新。
+                if self.overrideActive == nil,
+                   self.snapshot.activeAgents(now: self.now).isEmpty != self.snapshot.activeAgents(now: next).isEmpty {
+                    withAnimation(Self.wingsAnimation) { self.now = next }
+                } else {
+                    self.now = next
+                }
+            }
         }
     }
 
@@ -146,10 +166,16 @@ enum Palette {
     static let grayBar = Color(red: 99 / 255, green: 99 / 255, blue: 102 / 255)   // #636366
     static let divider = Color(red: 72 / 255, green: 72 / 255, blue: 74 / 255)    // #48484A
 
+    /// 各 agent 的颜色取自各家 logo，在黑底上略提亮：
+    /// Claude 用 Anthropic 的珊瑚橙；Codex（OpenAI）和 Grok（xAI）的 logo 都是黑白，分别取近白和中灰；
+    /// Gemini 星芒渐变取偏紫的一端，和 DeepSeek 鲸鱼蓝拉开。
     static func agent(_ a: Agent) -> Color {
         switch a {
-        case .claude: return accent
-        case .codex: return Color(red: 229 / 255, green: 229 / 255, blue: 234 / 255)   // #E5E5EA
+        case .claude: return Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)       // #D97757
+        case .codex: return Color(red: 229 / 255, green: 229 / 255, blue: 234 / 255)       // #E5E5EA
+        case .antigravity: return Color(red: 167 / 255, green: 139 / 255, blue: 250 / 255) // #A78BFA
+        case .grok: return Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)        // #8E8E93
+        case .deepseek: return Color(red: 91 / 255, green: 121 / 255, blue: 1.0)           // #5B79FF
         }
     }
 }

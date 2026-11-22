@@ -1,14 +1,6 @@
 import SwiftUI
 import TokenCore
 
-private func rangeTitle(_ s: RangeStats) -> String {
-    switch s.range {
-    case .all: return "全部（自 \(DateLabel.short(s.startDay)) 起 \(s.dayCount) 天）"
-    case .today: return "今日"
-    default: return "近 \(s.range.label)"
-    }
-}
-
 private func costText(_ t: TokenTotals) -> String {
     "≈ " + TokenFormat.cost(t.cost) + (t.unpricedTokens > 0 ? "+" : "")
 }
@@ -17,39 +9,43 @@ private func costText(_ t: TokenTotals) -> String {
 
 struct OverviewPage: View {
     @ObservedObject var model: NotchModel
+    @Environment(\.l10n) private var t
 
     var body: some View {
         let s = model.snapshot.stats(model.range)
-        let t = s.totals
+        let tot = s.totals
         let today = model.snapshot.live.values.reduce(Int64(0)) { $0 + $1.today }
 
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("合计 token · \(rangeTitle(s))").font(.system(size: 12)).foregroundStyle(Palette.text2)
-                    Text(TokenFormat.compact(t.total))
+            VStack(alignment: .leading, spacing: 2) {
+                // 标题单独一行，不和右侧指标抢宽度
+                Text("\(t.totalTokens) · \(t.rangeTitle(s))").font(.system(size: 12)).foregroundStyle(Palette.text2)
+                HStack(alignment: .bottom) {
+                    Text(TokenFormat.compact(tot.total))
                         .font(.system(size: 46, weight: .semibold)).tracking(-1)
-                }
-                Spacer()
-                HStack(spacing: 24) {
-                    if model.range != .today { Metric(label: "今日", value: TokenFormat.compact(today)) }
-                    Metric(label: "缓存命中", value: TokenFormat.percent(t.cacheHitRate))
-                    Metric(label: "输出", value: TokenFormat.compact(t.output))
-                    Metric(label: "实时合计", value: TokenFormat.speed(model.snapshot.liveTokPerSec), color: Palette.accent)
+                        .lineLimit(1).fixedSize()
+                    Spacer(minLength: 12)
+                    metrics(tot: tot, s: s, today: today)
                 }
             }
+
 
             if !s.agents.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     SegmentBar(segments: s.agents.map { (Double($0.totals.total), Palette.agent($0.agent)) })
-                    HStack(spacing: 24) {
+                    // agent 多时用短名、只显示占比，保证一行放得下
+                    let compact = s.agents.count > 3
+                    HStack(spacing: compact ? 18 : 24) {
                         ForEach(s.agents) { a in
                             HStack(spacing: 7) {
                                 Circle().fill(Palette.agent(a.agent)).frame(width: 7, height: 7)
-                                Text(a.agent.displayName).foregroundStyle(Color(white: 0.9))
-                                Text("\(TokenFormat.compact(a.totals.total)) · \(TokenFormat.percent(share(a.totals.total, t.total)))")
+                                Text(compact ? a.agent.shortName : a.agent.displayName).foregroundStyle(Color(white: 0.9))
+                                Text((compact ? "" : "\(TokenFormat.compact(a.totals.total)) · ")
+                                     + TokenFormat.percent(share(a.totals.total, tot.total)))
                                     .foregroundStyle(Palette.text2)
                             }
+                            .lineLimit(1)
+                            .fixedSize()
                         }
                     }
                     .font(.system(size: 12))
@@ -60,10 +56,10 @@ struct OverviewPage: View {
                 let peak = s.daily.max { $0.total < $1.total }
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("每日 · 按 agent 叠加")
+                        Text(t.dailyStacked)
                         Spacer()
                         if let peak, peak.total > 0 {
-                            Text("峰值 \(DateLabel.short(peak.day)) · \(TokenFormat.compact(peak.total))")
+                            Text(t.peak(peak.day, TokenFormat.compact(peak.total)))
                         }
                     }
                     .font(.system(size: 11)).foregroundStyle(Palette.text2)
@@ -71,7 +67,17 @@ struct OverviewPage: View {
                 }
             }
 
-            ModelTable(stats: s)
+            ModelTable(stats: s, t: t)
+        }
+    }
+
+    func metrics(tot: TokenTotals, s: RangeStats, today: Int64) -> some View {
+        HStack(spacing: 22) {
+            if model.range != .today { Metric(label: t.today, value: TokenFormat.compact(today)) }
+            Metric(label: t.cacheHit, value: TokenFormat.percent(tot.cacheHitRate))
+            Metric(label: t.output, value: TokenFormat.compact(tot.output))
+            Metric(label: t.editLines, value: TokenFormat.lines(s.editLines))
+            Metric(label: t.liveTotal, value: TokenFormat.speed(model.snapshot.liveTokPerSec), color: Palette.accent)
         }
     }
 
@@ -80,6 +86,7 @@ struct OverviewPage: View {
 
 struct ModelTable: View {
     var stats: RangeStats
+    var t: L10n
     let columns = [GridItem(.flexible(minimum: 140), alignment: .leading)]
 
     var body: some View {
@@ -89,7 +96,7 @@ struct ModelTable: View {
         let restTotal = rest.reduce(Int64(0)) { $0 + $1.totals.total }
 
         VStack(spacing: 0) {
-            row(cells: ["模型", "Agent", "平均 tok/s", "Token", "占比"], color: Palette.text3, size: 11)
+            row(cells: [t.colModel, t.colAgent, t.colSpeed, t.colTokens, t.colShare], color: Palette.text3, size: 11)
                 .padding(.bottom, 6)
                 .overlay(alignment: .bottom) { Rectangle().fill(Palette.track).frame(height: 1) }
             ForEach(top) { m in
@@ -112,7 +119,7 @@ struct ModelTable: View {
                 HStack(spacing: 0) {
                     HStack(spacing: 7) {
                         Circle().fill(Palette.divider).frame(width: 6, height: 6)
-                        Text("其他 \(rest.count) 个模型").foregroundStyle(Palette.text2)
+                        Text(t.otherModels(rest.count)).foregroundStyle(Palette.text2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(2)
@@ -125,8 +132,8 @@ struct ModelTable: View {
                 .padding(.vertical, 5)
             }
             HStack(spacing: 0) {
-                Text("合计").frame(maxWidth: .infinity, alignment: .leading).layoutPriority(2)
-                cell("\(stats.agents.count) 个 agent", Palette.text2, align: .leading, weight: .regular)
+                Text(t.total).frame(maxWidth: .infinity, alignment: .leading).layoutPriority(2)
+                cell(t.agentCount(stats.agents.count), Palette.text2, align: .leading, weight: .regular)
                 cell(costText(stats.totals), Palette.text2)
                 cell(TokenFormat.compact(total), Palette.text)
                 cell("100%", Palette.text)
@@ -162,6 +169,7 @@ struct ModelTable: View {
 struct AgentPage: View {
     @ObservedObject var model: NotchModel
     var agent: Agent
+    @Environment(\.l10n) private var tr
 
     var body: some View {
         let s = model.snapshot.stats(model.range)
@@ -174,37 +182,41 @@ struct AgentPage: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("今日 token").font(.system(size: 12)).foregroundStyle(Palette.text2)
+                    Text(tr.todayTokens).font(.system(size: 12)).foregroundStyle(Palette.text2)
                     Text(TokenFormat.compact(live?.today ?? 0))
                         .font(.system(size: 46, weight: .semibold)).tracking(-1)
                 }
                 Spacer()
                 HStack(spacing: 28) {
                     if model.range != .today {
-                        Metric(label: model.range == .all ? "全部" : "近 \(model.range.label)", value: TokenFormat.compact(t.total))
-                        Metric(label: "日均", value: TokenFormat.compact(t.total / Int64(s.dayCount)))
+                        Metric(label: tr.rangeMetric(model.range), value: TokenFormat.compact(t.total))
+                        Metric(label: tr.dailyAvg, value: TokenFormat.compact(t.total / Int64(s.dayCount)))
                     }
-                    Metric(label: "实时", value: TokenFormat.speed(live?.tokPerSec), color: Palette.agent(agent))
+                    Metric(label: tr.live, value: TokenFormat.speed(live?.tokPerSec), color: Palette.agent(agent))
                 }
             }
 
             HStack(spacing: 10) {
-                StatCell(label: "缓存命中", value: TokenFormat.percent(t.cacheHitRate))
-                StatCell(label: "输出", value: TokenFormat.compact(t.output))
-                StatCell(label: "缓存写入", value: TokenFormat.compact(t.cacheWrite))
-                StatCell(label: "子代理占比", value: TokenFormat.percent(a?.subagentShare))
+                StatCell(label: tr.cacheHit, value: TokenFormat.percent(t.cacheHitRate))
+                StatCell(label: tr.output, value: TokenFormat.compact(t.output))
+                StatCell(label: tr.editLines, value: TokenFormat.lines(a?.editLines ?? 0))
+                StatCell(label: tr.subagentShare, value: TokenFormat.percent(a?.subagentShare))
+                // 只有用过生图的 agent 才多出这一格
+                if (model.snapshot.stats(.all).agent(agent)?.imageCalls ?? 0) > 0 {
+                    StatCell(label: tr.imageCalls, value: tr.imageCallsValue(a?.imageCalls ?? 0, a?.images ?? 0))
+                }
             }
 
             HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(rangeTitle(s)).font(.system(size: 11)).foregroundStyle(Palette.text2)
+                    Text(tr.rangeTitle(s)).font(.system(size: 11)).foregroundStyle(Palette.text2)
                     DailyBars(days: s.daily, agent: agent, height: 100)
                         .padding(.top, 24)
                 }
                 .frame(maxWidth: .infinity)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("按模型 · \(rangeTitle(s))").font(.system(size: 11)).foregroundStyle(Palette.text2)
+                    Text(tr.byModel(tr.rangeTitle(s))).font(.system(size: 11)).foregroundStyle(Palette.text2)
                     ForEach(Array(models.prefix(5).enumerated()), id: \.element.id) { i, m in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -219,7 +231,7 @@ struct AgentPage: View {
                         }
                     }
                     if models.isEmpty {
-                        Text("这段时间没有记录").font(.system(size: 12)).foregroundStyle(Palette.text3)
+                        Text(tr.noRecords).font(.system(size: 12)).foregroundStyle(Palette.text3)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -232,24 +244,25 @@ struct AgentPage: View {
 
 struct DetailPage: View {
     @ObservedObject var model: NotchModel
+    @Environment(\.l10n) private var tr
 
     var body: some View {
         let s = model.snapshot.stats(model.range)
         let t = s.totals
         let total = max(1, t.total)
         let parts: [(String, Int64, Color)] = [
-            ("缓存读", t.cacheRead, Palette.accent),
-            ("缓存写", t.cacheWrite, Color(white: 0.9)),
-            ("新输入", t.input, Palette.text3),
-            ("输出", t.output, Palette.grayBar),
+            (tr.cacheRead, t.cacheRead, Palette.accent),
+            (tr.cacheWrite, t.cacheWrite, Color(white: 0.9)),
+            (tr.freshInput, t.input, Palette.text3),
+            (tr.output, t.output, Palette.grayBar),
         ]
 
         HStack(alignment: .top, spacing: 28) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("缓存命中").font(.system(size: 11)).foregroundStyle(Palette.text2)
+                Text(tr.cacheHit).font(.system(size: 11)).foregroundStyle(Palette.text2)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(TokenFormat.percent(t.cacheHitRate)).font(.system(size: 40, weight: .semibold)).tracking(-1)
-                    Text("缓存读 ÷ 全部输入").font(.system(size: 12)).foregroundStyle(Palette.text3)
+                    Text(tr.cacheHitFormula).font(.system(size: 12)).foregroundStyle(Palette.text3)
                 }
                 SegmentBar(segments: parts.map { (Double($0.1), $0.2) })
                 VStack(spacing: 6) {
@@ -271,16 +284,28 @@ struct DetailPage: View {
                         HStack {
                             Text(a.agent.displayName).foregroundStyle(Color(white: 0.9))
                             Spacer()
-                            Text("命中 \(TokenFormat.percent(a.totals.cacheHitRate))").foregroundStyle(Palette.text2)
+                            Text(tr.hitRate(TokenFormat.percent(a.totals.cacheHitRate))).foregroundStyle(Palette.text2)
                         }
                         .font(.system(size: 12))
                         Track(fraction: a.totals.cacheHitRate ?? 0, color: Palette.agent(a.agent))
                     }
                 }
+                if s.imageCalls > 0 {
+                    Rectangle().fill(Palette.track).frame(height: 1)
+                    Text(tr.imageTitle(s.imageCalls, s.images)).font(.system(size: 11)).foregroundStyle(Palette.text2)
+                    ForEach(s.imageModels.prefix(3)) { m in
+                        HStack {
+                            Text(m.model).foregroundStyle(Color(white: 0.9)).lineLimit(1)
+                            Spacer()
+                            Text(tr.imageModelRow(m.calls)).foregroundStyle(Palette.text2)
+                        }
+                        .font(.system(size: 12))
+                    }
+                }
             }
             .frame(width: 250)
 
-            ProjectList(stats: s)
+            ProjectList(stats: s, t: tr)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -288,6 +313,7 @@ struct DetailPage: View {
 
 struct ProjectList: View {
     var stats: RangeStats
+    var t: L10n
 
     var body: some View {
         let top = Array(stats.projects.prefix(6))
@@ -297,13 +323,28 @@ struct ProjectList: View {
         let maxP = max(1, top.first?.total ?? 1)
 
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("项目耗费 · \(stats.projects.count) 个项目")
-                Spacer()
+            // agent 多时图例放到标题下面单独一行，避免把整列撑宽
+            let legend = HStack(spacing: 8) {
                 ForEach(stats.agents) { a in
                     HStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 2).fill(Palette.agent(a.agent)).frame(width: 7, height: 7)
                         Text(a.agent.shortName)
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
+                }
+            }
+            Group {
+                if stats.agents.count > 3 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(t.projectsTitle(stats.projects.count)).lineLimit(1)
+                        legend
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Text(t.projectsTitle(stats.projects.count)).lineLimit(1)
+                        Spacer(minLength: 0)
+                        legend
                     }
                 }
             }
@@ -312,7 +353,7 @@ struct ProjectList: View {
             ForEach(top) { p in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
-                        Text(p.name).foregroundStyle(Color(white: 0.9)).lineLimit(1).truncationMode(.middle)
+                        Text(t.projectName(p.name)).foregroundStyle(Color(white: 0.9)).lineLimit(1).truncationMode(.middle)
                             .help(p.cwd)
                         Spacer(minLength: 4)
                         Text(TokenFormat.compact(p.total))
@@ -334,7 +375,7 @@ struct ProjectList: View {
             }
             if !rest.isEmpty {
                 HStack(spacing: 10) {
-                    Text("其他 \(rest.count) 个项目").foregroundStyle(Palette.text2)
+                    Text(t.otherProjects(rest.count)).foregroundStyle(Palette.text2)
                     Spacer()
                     Text(TokenFormat.compact(restTotal))
                     Text("≈ " + TokenFormat.cost(restCost)).foregroundStyle(Palette.text2)
@@ -343,7 +384,7 @@ struct ProjectList: View {
                 .font(.system(size: 12))
             }
             HStack(spacing: 10) {
-                Text("合计")
+                Text(t.total)
                 Spacer()
                 Text(TokenFormat.compact(stats.totals.total))
                 Text(costText(stats.totals)).frame(width: 64, alignment: .trailing)

@@ -69,6 +69,36 @@ public final class SQLiteDB: @unchecked Sendable {
         try exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;")
     }
 
+    /// 只读打开别的程序的库（Antigravity 的原生库）：不建文件、不改日志模式；对方正在写时不等待。
+    public init(readOnly path: String) throws {
+        guard FileManager.default.fileExists(atPath: path) else { throw SQLiteError(message: "不存在：\(path)") }
+        func open(_ name: String, _ extra: Int32) -> OpaquePointer? {
+            var h: OpaquePointer?
+            guard sqlite3_open_v2(name, &h, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | extra, nil) == SQLITE_OK,
+                  let h else {
+                if let h { sqlite3_close_v2(h) }
+                return nil
+            }
+            sqlite3_busy_timeout(h, 0)
+            // 打开是惰性的，真正读一下才知道行不行
+            guard sqlite3_exec(h, "SELECT count(*) FROM sqlite_master", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_close_v2(h)
+                return nil
+            }
+            return h
+        }
+        // WAL 库在没有 -shm 文件时，只读连接建不了共享内存、打不开；退回 immutable 模式（不碰旁边的文件，
+        // 但看不到还没合并进主文件的 WAL 内容——对方正在写的最新几步下次扫描再补）。
+        var uri = URLComponents()
+        uri.scheme = "file"
+        uri.path = path
+        uri.queryItems = [URLQueryItem(name: "immutable", value: "1")]
+        guard let h = open(path, 0) ?? uri.string.flatMap({ open($0, SQLITE_OPEN_URI) }) else {
+            throw SQLiteError(message: "无法打开 \(path)")
+        }
+        handle = h
+    }
+
     deinit { sqlite3_close_v2(handle) }
 
     public func exec(_ sql: String) throws {
