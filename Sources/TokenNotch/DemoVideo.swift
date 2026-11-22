@@ -72,6 +72,9 @@ enum DemoVideo {
         let claude = live.first { $0.agent == .claude } ?? LiveStat(agent: .claude, today: 0, lastActivity: Date(), tokPerSec: 128)
         let codex = live.first { $0.agent == .codex } ?? LiveStat(agent: .codex, today: 0, lastActivity: Date(), tokPerSec: 46)
 
+        // 两翼轮播：Claude、Codex 打头，其余正在跑的 agent 跟在后面
+        let active = [claude, codex] + live.filter { $0.agent != .claude && $0.agent != .codex }
+
         func key(_ state: NotchState, active: [LiveStat]? = nil, rotation: Int = 0,
                  tab: PanelTab = .overview, range: TimeRange = .week) -> Key? {
             model.forced = state
@@ -89,8 +92,8 @@ enum DemoVideo {
         }
 
         guard let idle = key(.idle, active: []),
-              let wingsA = key(.active, active: [claude, codex], rotation: 0),
-              let wingsB = key(.active, active: [claude, codex], rotation: 1),
+              let wingsA = key(.active, active: active, rotation: 0),
+              let wingsB = key(.active, active: active, rotation: 1),
               let overview = key(.expanded, tab: .overview, range: .week),
               let agent = key(.expanded, tab: .agent(.claude), range: .week),
               let detail = key(.expanded, tab: .detail, range: .month),
@@ -134,38 +137,42 @@ enum DemoVideo {
         let close = { (t: Double) in spring(t, response: 0.3, damping: 0.96) }
         let page = { (t: Double) in ease(t / 0.3) }
 
-        hold(idle, 0.9)
-        transition(idle, wingsA, 0.7, shape: wings, outA: { _ in 1 }, inB: { fadeIn($0, delay: 0.08, dur: 0.2) })
-        hold(wingsA, 1.5)
-        transition(wingsA, wingsB, 0.45, shape: { _ in 1 }, outA: { 1 - ease($0 / 0.45) }, inB: { ease($0 / 0.45) })
-        hold(wingsB, 0.9, moveTo: notch, moveDur: 0.8)
-        transition(wingsB, overview, 0.9, shape: open, outA: { 1 - ease($0 / 0.09) },
-                   inB: { fadeIn($0, delay: 0.12, dur: 0.24) })
-        hold(overview, 2.4, moveTo: CGPoint(x: canvas.width / 2 + 40, y: 230), moveDur: 0.7)
-        hold(overview, 0.6, moveTo: tabClaude, moveDur: 0.55)
-        click(overview)
-        transition(overview, agent, 0.4, shape: page, outA: { 1 - ease($0 / 0.2) }, inB: { ease($0 / 0.25) })
-        hold(agent, 2.4)
-        hold(agent, 0.6, moveTo: tabDetail, moveDur: 0.55)
-        click(agent)
-        transition(agent, detail, 0.4, shape: page, outA: { 1 - ease($0 / 0.2) }, inB: { ease($0 / 0.25) })
-        hold(detail, 2.6)
-        hold(detail, 0.7, moveTo: rest, moveDur: 0.6)
-        transition(detail, wingsB, 0.6, shape: close, outA: { 1 - ease($0 / 0.09) },
-                   inB: { fadeIn($0, delay: 0.15, dur: 0.2) })
-        hold(wingsB, 1.2)
-        transition(wingsB, idle, 0.6, shape: wings, outA: { 1 - ease($0 / 0.1) }, inB: { _ in 0 })
         hold(idle, 0.5)
+        transition(idle, wingsA, 0.6, shape: wings, outA: { _ in 1 }, inB: { fadeIn($0, delay: 0.08, dur: 0.2) })
+        hold(wingsA, 0.9)
+        transition(wingsA, wingsB, 0.4, shape: { _ in 1 }, outA: { 1 - ease($0 / 0.4) }, inB: { ease($0 / 0.4) })
+        hold(wingsB, 0.65, moveTo: notch, moveDur: 0.55)
+        transition(wingsB, overview, 0.8, shape: open, outA: { 1 - ease($0 / 0.09) },
+                   inB: { fadeIn($0, delay: 0.12, dur: 0.24) })
+        hold(overview, 1.5, moveTo: CGPoint(x: canvas.width / 2 + 40, y: 230), moveDur: 0.5)
+        hold(overview, 0.45, moveTo: tabClaude, moveDur: 0.4)
+        click(overview)
+        transition(overview, agent, 0.35, shape: page, outA: { 1 - ease($0 / 0.2) }, inB: { ease($0 / 0.25) })
+        hold(agent, 1.5)
+        hold(agent, 0.45, moveTo: tabDetail, moveDur: 0.4)
+        click(agent)
+        transition(agent, detail, 0.35, shape: page, outA: { 1 - ease($0 / 0.2) }, inB: { ease($0 / 0.25) })
+        hold(detail, 1.7)
+        hold(detail, 0.5, moveTo: rest, moveDur: 0.45)
+        transition(detail, wingsB, 0.55, shape: close, outA: { 1 - ease($0 / 0.09) },
+                   inB: { fadeIn($0, delay: 0.15, dur: 0.2) })
+        hold(wingsB, 0.8)
+        transition(wingsB, idle, 0.5, shape: wings, outA: { 1 - ease($0 / 0.1) }, inB: { _ in 0 })
+        hold(idle, 0.3)
 
+        // 桌面上的 agent 窗口随时间往下滚
+        let windowStates = DemoDesktop.renderStates()
         for (i, f) in frames.enumerated() {
-            guard let img = compose(background: background, a: f.0, b: f.1, p: f.2, alphaA: f.3, alphaB: f.4,
+            guard let img = compose(background: background, desktop: DemoDesktop.layers(windowStates, at: Double(i) / fps),
+                                    a: f.0, b: f.1, p: f.2, alphaA: f.3, alphaB: f.4,
                                     cursor: f.5, pressed: f.6) else { continue }
             write(img, to: String(format: "%@/frames/%04d.jpg", dir, i), jpeg: true)
         }
         // 静态截图：各页面停稳时的样子
         for (name, k) in [("overview", overview), ("agent", agent), ("detail", detail), ("wings", wingsA)] {
-            if let img = compose(background: background, a: k, b: nil, p: 1, alphaA: 1, alphaB: 0, cursor: nil, pressed: false) {
-                write(img, to: "\(dir)/\(name).png", jpeg: false)
+            if let img = compose(background: background, desktop: DemoDesktop.layers(windowStates, at: 0),
+                                 a: k, b: nil, p: 1, alphaA: 1, alphaB: 0, cursor: nil, pressed: false) {
+                write(img, to: "\(dir)/\(name).jpg", jpeg: true)
             }
         }
     }
@@ -219,7 +226,7 @@ enum DemoVideo {
         return r.cgImage
     }
 
-    static func compose(background: CGImage, a: Key, b: Key?, p: Double, alphaA: Double, alphaB: Double,
+    static func compose(background: CGImage, desktop: [(CGImage, CGRect)] = [], a: Key, b: Key?, p: Double, alphaA: Double, alphaB: Double,
                         cursor: CGPoint?, pressed: Bool) -> CGImage? {
         let pw = Int(canvas.width * scale), ph = Int(canvas.height * scale)
         guard let ctx = CGContext(data: nil, width: pw, height: ph, bitsPerComponent: 8, bytesPerRow: 0,
@@ -238,6 +245,7 @@ enum DemoVideo {
             ctx.restoreGState()
         }
         draw(background, in: CGRect(origin: .zero, size: canvas))
+        for (image, rect) in desktop { draw(image, in: rect) }
 
         let s = b.map { Shape.lerp(a.shape, $0.shape, CGFloat(p)) } ?? a.shape
         let rect = CGRect(x: canvas.width / 2 - s.w / 2, y: 0, width: s.w, height: s.h)

@@ -77,8 +77,9 @@ public enum DemoData {
                 }
             }
         }
-        // 最近几十秒内的响应：让 Claude 和 Codex 显示为“正在运行”，并有实时 tok/s
-        for (agent, model, tps) in [(Agent.claude, "claude-opus-5-5", 128.0), (.codex, "gpt-6.2-sol", 46.0)] {
+        // 最近几十秒内的响应：让这几个 agent 显示为“正在运行”，并有实时 tok/s
+        for (agent, model, tps) in [(Agent.claude, "claude-opus-5-5", 128.0), (.codex, "gpt-6.2-sol", 46.0),
+                                    (.deepseek, "deepseek-v4.1-flash", 96.0), (.antigravity, "gemini-4-carbon-high", 58.0)] {
             for k in 0..<4 {
                 let output: Int64 = 900 + Int64(k) * 150
                 events.append(UsageEvent(
