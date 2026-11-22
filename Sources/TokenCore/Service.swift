@@ -52,6 +52,8 @@ public final class TokenService: @unchecked Sendable {
     public private(set) var engine: StatsEngine
     public var onSnapshot: ((Snapshot) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// 首次全量扫描是否已完成（在 onSnapshot 回调里读，同一队列）。
+    public private(set) var ready = false
 
     private let queue = DispatchQueue(label: "token-notch.service", qos: .utility)
     private var watcher: FileWatcher?
@@ -68,7 +70,9 @@ public final class TokenService: @unchecked Sendable {
 
     public func start() {
         queue.async { [self] in
-            run { try ingestor.scanAll() }
+            // 首次回填可能要十几秒（DeepSeek Harness 的压缩日志），每扫完一类 agent 先发一份快照
+            run { try ingestor.scanAll(afterSource: { [weak self] _ in self?.publish() }) }
+            ready = true
             publish()
             startWatching()
             // 兜底：每分钟扫一遍（只读有变化的文件），也负责发现新建的日志目录。

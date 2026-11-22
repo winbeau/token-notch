@@ -91,7 +91,11 @@ public enum EditCount {
 
     /// 整个写入文件：全部算新增。
     public static func write(_ content: String) -> EditChange {
-        .block(added: lines(content).count, removed: 0)
+        // 只数换行，不切分（写入的整个文件可能很大）
+        let u = content.utf8
+        guard !u.isEmpty else { return EditChange() }
+        let n = u.reduce(0) { $1 == 0x0A ? $0 + 1 : $0 } + (u.last == 0x0A ? 0 : 1)
+        return .block(added: n, removed: 0)
     }
 
     /// apply_patch 格式（`*** Begin Patch` … `*** End Patch`）。每段连续的 +/− 行是一处改动；

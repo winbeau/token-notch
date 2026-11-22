@@ -170,6 +170,10 @@ enum Palette {
         switch a {
         case .claude: return accent
         case .codex: return Color(red: 229 / 255, green: 229 / 255, blue: 234 / 255)   // #E5E5EA
+        // 新 agent 选色相与橙、白都拉开，且在黑底上亮度足够
+        case .antigravity: return Color(red: 77 / 255, green: 148 / 255, blue: 1.0)    // #4D94FF 蓝
+        case .grok: return Color(red: 191 / 255, green: 90 / 255, blue: 242 / 255)      // #BF5AF2 紫
+        case .deepseek: return Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255)   // #30D158 绿
         }
     }
 }

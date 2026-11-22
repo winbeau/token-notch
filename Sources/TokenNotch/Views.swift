@@ -160,15 +160,17 @@ struct PanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 0) {
-                HStack(spacing: 4) {
+                // 标签多（agent 多）时收紧内边距，保证和时间范围一行放下、不截断
+                let compact = model.tabs.count > 5
+                HStack(spacing: compact ? 2 : 4) {
                     ForEach(model.tabs, id: \.self) { tab in
-                        TabPill(title: title(tab), dot: dot(tab), selected: model.tab == tab) {
+                        TabPill(title: title(tab), dot: dot(tab), selected: model.tab == tab, padding: compact ? 7 : 9) {
                             withAnimation(.easeInOut(duration: 0.2)) { model.tab = tab }
                         }
                     }
                 }
                 Spacer(minLength: 12)
-                RangePicker(selection: $model.range, t: model.t)
+                RangePicker(selection: $model.range, t: model.t, padding: model.tabs.count > 5 ? 7 : 9)
             }
             .frame(height: 20)
 
@@ -203,16 +205,17 @@ struct TabPill: View {
     var title: String
     var dot: Color?
     var selected: Bool
+    var padding: CGFloat = 9
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 if let dot { Circle().fill(dot).frame(width: 5, height: 5) }
-                Text(title)
+                Text(title).lineLimit(1).fixedSize()
             }
             .font(.system(size: 11))
-            .padding(.horizontal, 9)
+            .padding(.horizontal, padding)
             .padding(.vertical, 2)
             .foregroundStyle(selected ? Palette.text : Palette.text3)
             .background(Capsule().fill(selected ? Palette.track : Color.clear))
@@ -225,6 +228,7 @@ struct TabPill: View {
 struct RangePicker: View {
     @Binding var selection: TimeRange
     var t: L10n
+    var padding: CGFloat = 9
 
     var body: some View {
         HStack(spacing: 2) {
@@ -233,8 +237,9 @@ struct RangePicker: View {
                     withAnimation(.easeInOut(duration: 0.2)) { selection = r }
                 } label: {
                     Text(t.range(r))
+                        .lineLimit(1).fixedSize()
                         .font(.system(size: 11))
-                        .padding(.horizontal, 9)
+                        .padding(.horizontal, padding)
                         .padding(.vertical, 1)
                         .foregroundStyle(selection == r ? Palette.text : Palette.text3)
                         .background(Capsule().fill(selection == r ? Palette.muted : Color.clear))

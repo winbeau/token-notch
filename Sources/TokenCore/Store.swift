@@ -86,6 +86,9 @@ public final class Store: @unchecked Sendable {
         INSERT INTO events (key, agent, ts, day, model, cwd, session, sub, input, cache_read, cache_write, output, gen_ms)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET
+            model       = CASE WHEN events.model = 'unknown' THEN excluded.model ELSE events.model END,
+            cwd         = CASE WHEN events.cwd = '' THEN excluded.cwd ELSE events.cwd END,
+            sub         = max(sub, excluded.sub),
             input       = max(input, excluded.input),
             cache_read  = max(cache_read, excluded.cache_read),
             cache_write = max(cache_write, excluded.cache_write),

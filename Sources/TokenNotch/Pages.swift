@@ -33,14 +33,19 @@ struct OverviewPage: View {
             if !s.agents.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     SegmentBar(segments: s.agents.map { (Double($0.totals.total), Palette.agent($0.agent)) })
-                    HStack(spacing: 24) {
+                    // agent 多时用短名、只显示占比，保证一行放得下
+                    let compact = s.agents.count > 3
+                    HStack(spacing: compact ? 18 : 24) {
                         ForEach(s.agents) { a in
                             HStack(spacing: 7) {
                                 Circle().fill(Palette.agent(a.agent)).frame(width: 7, height: 7)
-                                Text(a.agent.displayName).foregroundStyle(Color(white: 0.9))
-                                Text("\(TokenFormat.compact(a.totals.total)) · \(TokenFormat.percent(share(a.totals.total, tot.total)))")
+                                Text(compact ? a.agent.shortName : a.agent.displayName).foregroundStyle(Color(white: 0.9))
+                                Text((compact ? "" : "\(TokenFormat.compact(a.totals.total)) · ")
+                                     + TokenFormat.percent(share(a.totals.total, tot.total)))
                                     .foregroundStyle(Palette.text2)
                             }
+                            .lineLimit(1)
+                            .fixedSize()
                         }
                     }
                     .font(.system(size: 12))
@@ -302,13 +307,28 @@ struct ProjectList: View {
         let maxP = max(1, top.first?.total ?? 1)
 
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(t.projectsTitle(stats.projects.count))
-                Spacer()
+            // agent 多时图例放到标题下面单独一行，避免把整列撑宽
+            let legend = HStack(spacing: 8) {
                 ForEach(stats.agents) { a in
                     HStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 2).fill(Palette.agent(a.agent)).frame(width: 7, height: 7)
                         Text(a.agent.shortName)
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
+                }
+            }
+            Group {
+                if stats.agents.count > 3 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(t.projectsTitle(stats.projects.count)).lineLimit(1)
+                        legend
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Text(t.projectsTitle(stats.projects.count)).lineLimit(1)
+                        Spacer(minLength: 0)
+                        legend
                     }
                 }
             }

@@ -54,6 +54,13 @@ public enum TokenFormat {
             let version = parts.joined(separator: ".")
             return family.prefix(1).uppercased() + family.dropFirst() + (version.isEmpty ? "" : " " + version)
         }
+        // gemini-3.8-flash-high → Gemini 3.8 Flash High；grok-4.7 → Grok 4.7；deepseek-v4-pro → DeepSeek V4 Pro
+        if s.hasPrefix("gemini-") || s.hasPrefix("grok-") || s.hasPrefix("deepseek-") {
+            return s.split(separator: "-").map { w -> String in
+                if w == "deepseek" { return "DeepSeek" }
+                return w.prefix(1).uppercased() + w.dropFirst()
+            }.joined(separator: " ")
+        }
         if s.hasPrefix("gpt-") {
             let parts = s.split(separator: "-").map(String.init)
             guard parts.count >= 2 else { return id.uppercased() }

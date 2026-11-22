@@ -16,10 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let service = TokenService(store: try Store.openDefault())
             var rendered = false
-            service.onSnapshot = { snap in
+            service.onSnapshot = { [unowned service] snap in
+                let ready = service.ready
                 DispatchQueue.main.async {
                     withAnimationIfVisible { model.snapshot = snap }
-                    if let dir = DebugRender.directory, !rendered {
+                    if let dir = DebugRender.directory, ready, !rendered {
                         rendered = true
                         DebugRender.run(model: model, into: dir)
                     }

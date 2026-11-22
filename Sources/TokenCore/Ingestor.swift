@@ -1,21 +1,50 @@
 import Foundation
 
+/// 日志目录下哪些文件算日志。
+public enum FileMatch: Sendable {
+    case jsonl                  // 任意 *.jsonl
+    case named(String)          // 固定文件名（目录里还有别的 jsonl）
+    case dshSession             // session.v<N>.jsonl[.zstd]
+
+    public func accepts(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        switch self {
+        case .jsonl: return name.hasSuffix(".jsonl")
+        case .named(let n): return name == n
+        case .dshSession:
+            return name.hasPrefix("session.v") && (name.hasSuffix(".jsonl") || name.hasSuffix(".jsonl.zstd"))
+        }
+    }
+}
+
 /// 一类 agent 的日志位置。
 public struct LogSource: Sendable {
     public var agent: Agent
     public var roots: [URL]
+    public var match: FileMatch
 
-    public init(agent: Agent, roots: [URL]) {
+    public init(agent: Agent, roots: [URL], match: FileMatch = .jsonl) {
         self.agent = agent
         self.roots = roots
+        self.match = match
     }
 
     public static var defaults: [LogSource] {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        let env = ProcessInfo.processInfo.environment
+        let dsh = env["DSH_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".dsh")
         return [
             LogSource(agent: .claude, roots: [home.appendingPathComponent(".claude/projects")]),
             LogSource(agent: .codex, roots: [home.appendingPathComponent(".codex/sessions"),
                                              home.appendingPathComponent(".codex/archived_sessions")]),
+            // IDE 写 antigravity/，CLI 写 antigravity-cli/，布局相同
+            LogSource(agent: .antigravity, roots: [home.appendingPathComponent(".gemini/antigravity/brain"),
+                                                   home.appendingPathComponent(".gemini/antigravity-cli/brain")],
+                      match: .named("transcript_full.jsonl")),
+            LogSource(agent: .grok, roots: [home.appendingPathComponent(".grok/sessions"),
+                                            home.appendingPathComponent(".grok/archived_sessions")],
+                      match: .named("updates.jsonl")),
+            LogSource(agent: .deepseek, roots: [dsh.appendingPathComponent("sessions")], match: .dshSession),
         ]
     }
 }
@@ -46,7 +75,7 @@ public final class Ingestor: @unchecked Sendable {
         self.store = store
         // 统一成解析过符号链接的路径：目录遍历、FSEvents 和调用方给的路径才能对上同一个游标。
         self.sources = sources.map {
-            LogSource(agent: $0.agent, roots: $0.roots.map { URL(fileURLWithPath: Self.canonical($0.path)) })
+            LogSource(agent: $0.agent, roots: $0.roots.map { URL(fileURLWithPath: Self.canonical($0.path)) }, match: $0.match)
         }
     }
 
@@ -59,18 +88,20 @@ public final class Ingestor: @unchecked Sendable {
     }
 
     /// 扫描所有来源，只读有变化的文件。首次运行即全量回填。
+    /// `afterSource`：每扫完一类 agent 回调一次（首次回填时让界面先显示已导入的部分）。
     @discardableResult
-    public func scanAll() throws -> IngestResult {
+    public func scanAll(afterSource: ((Agent) -> Void)? = nil) throws -> IngestResult {
         let cursors = try store.allCursors()
         var result = IngestResult()
         for source in sources {
-            for path in Self.jsonlFiles(under: source.roots) {
+            for path in Self.files(under: source.roots, match: source.match) {
                 guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
                       let size = (attrs[.size] as? NSNumber)?.int64Value else { continue }
                 let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
                 if let c = cursors[path], c.offset == size, c.mtime == mtime { continue }
                 result.add(try ingestFile(path, agent: source.agent), agent: source.agent)
             }
+            afterSource?(source.agent)
         }
         return result
     }
@@ -79,26 +110,29 @@ public final class Ingestor: @unchecked Sendable {
     @discardableResult
     public func ingest(paths: [String]) throws -> IngestResult {
         var result = IngestResult()
-        for path in Set(paths.map(Self.canonical)) where path.hasSuffix(".jsonl") {
-            guard let agent = agent(for: path), FileManager.default.fileExists(atPath: path) else { continue }
+        for path in Set(paths.map(Self.canonical)) {
+            guard let source = source(for: path), source.match.accepts(path),
+                  FileManager.default.fileExists(atPath: path) else { continue }
+            let agent = source.agent
             result.add(try ingestFile(path, agent: agent), agent: agent)
         }
         return result
     }
 
     public func agent(for path: String) -> Agent? {
-        let path = Self.canonical(path)
-        for s in sources where s.roots.contains(where: { path.hasPrefix($0.path + "/") }) {
-            return s.agent
-        }
-        return nil
+        source(for: path)?.agent
     }
 
-    static func jsonlFiles(under roots: [URL]) -> [String] {
+    func source(for path: String) -> LogSource? {
+        let path = Self.canonical(path)
+        return sources.first { s in s.roots.contains(where: { path.hasPrefix($0.path + "/") }) }
+    }
+
+    static func files(under roots: [URL], match: FileMatch) -> [String] {
         var out: [String] = []
         for root in roots {
             guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
-            for case let url as URL in e where url.pathExtension == "jsonl" {
+            for case let url as URL in e where match.accepts(url.path) {
                 out.append(url.path)
             }
         }
@@ -109,6 +143,9 @@ public final class Ingestor: @unchecked Sendable {
         switch agent {
         case .claude: return try ingest(path, agent: agent, parser: ClaudeParser.self)
         case .codex: return try ingest(path, agent: agent, parser: CodexParser.self)
+        case .antigravity: return try ingest(path, agent: agent, parser: AntigravityParser.self)
+        case .grok: return try ingest(path, agent: agent, parser: GrokParser.self)
+        case .deepseek: return try ingest(path, agent: agent, parser: DeepSeekParser.self)
         }
     }
 
@@ -134,7 +171,15 @@ public final class Ingestor: @unchecked Sendable {
         }
 
         try fh.seek(toOffset: UInt64(offset))
-        let data = try fh.readToEnd() ?? Data()
+        var data = try fh.readToEnd() ?? Data()
+        // zstd 压缩的日志（DeepSeek Harness）：只取完整帧解压；游标按压缩字节前进
+        var compressedConsumed: Int?
+        if path.hasSuffix(".zstd") {
+            guard let n = Zstd.completeFramesLength(data), n > 0,
+                  let plain = Zstd.decompress(data.prefix(n)) else { return (0, 0) }
+            compressedConsumed = n
+            data = plain
+        }
         // 用 memchr 找行边界（Data.firstIndex 逐字节走泛型路径，几 GB 日志上慢一个量级）。
         var lines: [Range<Int>] = []
         var consumed = 0
@@ -156,7 +201,7 @@ public final class Ingestor: @unchecked Sendable {
             p.consume(line: data[(base + r.lowerBound)..<(base + r.upperBound)], path: path, into: &out)
         }
         P.enrich(&out, path: path)
-        let newOffset = offset + Int64(consumed)
+        let newOffset = offset + Int64(compressedConsumed ?? consumed)
         let cursor = Store.Cursor(path: path, agent: agent, offset: newOffset,
                                   fingerprint: Self.fingerprint(fh, end: newOffset), mtime: mtime,
                                   state: try? JSONEncoder().encode(p))

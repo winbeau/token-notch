@@ -3,11 +3,17 @@ import Foundation
 public enum Agent: String, CaseIterable, Sendable, Codable, Hashable {
     case claude
     case codex
+    case antigravity   // Google Antigravity（Gemini）
+    case grok          // Grok Build / Grok App
+    case deepseek      // DeepSeek Harness（DSH）
 
     public var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
+        case .grok: return "Grok"
+        case .deepseek: return "DeepSeek Harness"
         }
     }
 
@@ -15,6 +21,9 @@ public enum Agent: String, CaseIterable, Sendable, Codable, Hashable {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
+        case .grok: return "Grok"
+        case .deepseek: return "DeepSeek"
         }
     }
 }
