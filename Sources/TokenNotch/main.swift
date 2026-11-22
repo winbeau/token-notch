@@ -14,7 +14,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = NotchWindowController(model: model)
 
         do {
-            let service = TokenService(store: try Store.openDefault())
+            // TOKEN_NOTCH_DEMO=1：临时库 + 演示数据，不读任何真实日志（截图、演示视频用）
+            let demo = ProcessInfo.processInfo.environment["TOKEN_NOTCH_DEMO"] != nil
+            let service: TokenService
+            if demo {
+                let path = FileManager.default.temporaryDirectory.appendingPathComponent("token-notch-demo.db").path
+                for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+                let store = try Store(path: path)
+                try DemoData.populate(store)
+                service = TokenService(store: store, sources: [])
+            } else {
+                service = TokenService(store: try Store.openDefault())
+            }
             var rendered = false
             service.onSnapshot = { [unowned service] snap in
                 let ready = service.ready
@@ -23,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if let dir = DebugRender.directory, ready, !rendered {
                         rendered = true
                         DebugRender.run(model: model, into: dir)
+                    } else if let dir = DemoVideo.directory, ready, !rendered {
+                        rendered = true
+                        DemoVideo.run(model: model, into: dir)
                     }
                 }
             }

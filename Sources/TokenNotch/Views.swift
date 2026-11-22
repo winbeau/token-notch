@@ -107,15 +107,19 @@ struct WingsView: View {
 
                 Spacer(minLength: model.geometry.notchWidth)
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if let tps = live.tokPerSec {
                         Text(TokenFormat.speed(tps))
                             .font(.system(size: 11))
                             .foregroundStyle(Palette.agent(live.agent))
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                     Text(TokenFormat.compact(live.today))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .fixedSize()
                     if active.count > 1 {
                         HStack(spacing: 3) {
                             ForEach(0..<active.count, id: \.self) { i in
@@ -127,7 +131,7 @@ struct WingsView: View {
                     }
                 }
                 .monospacedDigit()
-                .padding(.trailing, 18)
+                .padding(.trailing, 16)
                 .frame(width: NotchModel.wingWidth, alignment: .trailing)
                 .id("R-\(live.agent.rawValue)")
                 .transition(.opacity)
