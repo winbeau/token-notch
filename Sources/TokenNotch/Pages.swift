@@ -211,8 +211,15 @@ struct AgentPage: View {
             HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(tr.rangeTitle(s)).font(.system(size: 11)).foregroundStyle(Palette.text2)
-                    DailyBars(days: s.daily, agent: agent, height: 100)
-                        .padding(.top, 24)
+                    // 只有一天时按天画只剩一根柱子，改成一个模型一根
+                    Group {
+                        if s.daily.count > 1 {
+                            DailyBars(days: s.daily, agent: agent, height: 100)
+                        } else {
+                            ModelBars(models: Array(models.prefix(5)), color: Palette.agent(agent), height: 100)
+                        }
+                    }
+                    .padding(.top, 24)
                 }
                 .frame(maxWidth: .infinity)
 

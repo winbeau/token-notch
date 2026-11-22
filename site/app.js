@@ -200,6 +200,14 @@ function bars(s, agentId, height) {
   return `<div class="p-bars${agentId ? ' solo' : ''}${dense ? ' dense' : ''}" style="height:${height}px;gap:${dense ? 2 : 8}px">${cols}</div>${labels}`;
 }
 
+// 单日范围：一个模型一根柱子
+function modelBars(x, a, height) {
+  const ms = x.models.slice(0, 5), max = Math.max(1, ...ms.map(m => m.total));
+  return `<div class="p-mbars" style="height:${height}px">${ms.map((m, i) =>
+    `<div><span>${fmt.compact(m.total)}</span><i style="height:${Math.max(2, (height - 18) * m.total / max)}px;background:${i ? '#3a3a3c' : a.color}"></i></div>`).join('')}</div>
+    <div class="p-labels p-mlabels" style="gap:8px">${ms.map((m, i) => `<span${i ? '' : ' class="first"'}>${m.name}</span>`).join('')}</div>`;
+}
+
 function pageOverview(s) {
   const t = T(), liveTotal = live.claude + live.codex;
   const peak = s.slice.reduce((best, d) => {
@@ -237,7 +245,7 @@ function pageAgent(s, id) {
       ${metric(t.live, speed, a.color, live[id] ? id : '')}</div></div>
     <div class="p-cells">${cell(t.cacheHit, fmt.pct(x.hit))}${cell(t.output, fmt.compact(x.output))}${cell(t.editLines, fmt.lines(x.lines))}${cell(t.subagents, fmt.pct(a.sub))}
       ${hasImages ? cell(t.imageCalls, x.imageCalls, t.imgDetail(x.imageCalls, x.images)) : ''}</div>
-    <div class="p-cols"><div><div class="p-cap"><span>${rangeTitle(s)}</span></div><div style="margin-top:26px">${bars(s, id, 100)}</div></div>
+    <div class="p-cols"><div><div class="p-cap"><span>${rangeTitle(s)}</span></div><div style="margin-top:26px">${s.n > 1 ? bars(s, id, 100) : modelBars(x, a, 100)}</div></div>
       <div class="p-stack"><div class="p-cap" style="margin:0"><span>${t.byModel}${rangeTitle(s)}</span></div>
       ${x.models.map((m, i) => `<div><div class="p-row"><span>${m.name}</span><span class="t2">${fmt.compact(m.total)} · ${fmt.pct(m.total / x.total)}</span></div>
         <div class="p-track"><i style="width:${m.total / x.total * 100}%;background:${i ? '#8e8e93' : a.color}"></i></div></div>`).join('')}</div></div>

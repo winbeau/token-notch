@@ -338,6 +338,47 @@ struct Track: View {
     }
 }
 
+/// 单日范围下的柱图：一个模型一根柱子，顺序和配色同右侧的模型列表，柱顶标数值。
+struct ModelBars: View {
+    var models: [ModelStat]
+    var color: Color
+    var height: CGFloat = 100
+
+    var body: some View {
+        let maxV = max(1, models.map(\.totals.total).max() ?? 1)
+        VStack(spacing: 6) {
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(Array(models.enumerated()), id: \.element.id) { i, m in
+                    VStack(spacing: 4) {
+                        Spacer(minLength: 0)
+                        Text(TokenFormat.compact(m.totals.total))
+                            .font(.system(size: 11)).foregroundStyle(Palette.text2).lineLimit(1).fixedSize()
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(i == 0 ? color : Palette.muted)
+                            .frame(maxWidth: 72)
+                            .frame(height: max(2, (height - 18) * CGFloat(m.totals.total) / CGFloat(maxV)))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                if models.isEmpty {
+                    Rectangle().fill(Palette.track).frame(height: 1)
+                }
+            }
+            .frame(height: height)
+            HStack(spacing: 8) {
+                ForEach(Array(models.enumerated()), id: \.element.id) { i, m in
+                    Text(TokenFormat.modelName(m.model))
+                        .font(.system(size: 11))
+                        .foregroundStyle(i == 0 ? Palette.text : Palette.text3)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                }
+                if models.isEmpty { Text(" ").font(.system(size: 11)) }
+            }
+        }
+    }
+}
+
 /// 每日柱图。`agent` 为 nil 时按 agent 叠加着色；悬停显示当天明细。
 struct DailyBars: View {
     var days: [DayStat]
