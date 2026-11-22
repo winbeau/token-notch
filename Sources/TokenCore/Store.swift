@@ -21,7 +21,7 @@ public final class Store: @unchecked Sendable {
         try migrate()
     }
 
-    static let schemaVersion = 3
+    static let schemaVersion = 4
 
     /// 同一模型的不同叫法，入库时统一。DeepSeek Harness 记的 deepseek-flash 就是 V4.1 Flash。
     static let modelAliases: [String: String] = [
@@ -105,6 +105,11 @@ public final class Store: @unchecked Sendable {
                 // 同上：重读全部日志以回填历史里的生图调用
                 if v >= 1 { try db.exec("DELETE FROM cursors;") }
             }
+            if v < 4 {
+                // 编辑行数换了算法（覆盖写入按 diff 算、临时目录等不计入）：清掉旧的编辑记录和游标，
+                // 让历史日志按新算法重算一遍。events、images 是按键幂等 upsert，重读不会重复计数。
+                if v >= 1 { try db.exec("DELETE FROM edits; DELETE FROM cursors;") }
+            }
             try db.exec("PRAGMA user_version = \(Self.schemaVersion);")
         }
     }
@@ -122,7 +127,8 @@ public final class Store: @unchecked Sendable {
             cache_read  = max(cache_read, excluded.cache_read),
             cache_write = max(cache_write, excluded.cache_write),
             output      = max(output, excluded.output),
-            gen_ms      = COALESCE(gen_ms, excluded.gen_ms)
+            gen_ms      = CASE WHEN excluded.gen_ms IS NULL THEN gen_ms WHEN gen_ms IS NULL THEN excluded.gen_ms
+                               ELSE max(gen_ms, excluded.gen_ms) END
         """)
 
     /// 同一键重复出现时（流式多行、文件被重读）取各字段最大值，所以重放是安全的。

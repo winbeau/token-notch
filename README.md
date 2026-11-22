@@ -18,7 +18,7 @@
 [![Grok](https://img.shields.io/badge/Grok-8E8E93?logo=x&logoColor=white)](#supported-agents)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-5B79FF)](#supported-agents)
 
-English · [简体中文](README.zh-CN.md)
+**[Website & live demo](https://winbeau.github.io/token-notch/)** · English · [简体中文](README.zh-CN.md)
 
 <img src="docs/images/demo.gif" width="880" alt="Token Notch demo: wings appear while agents run, hover to expand the overview, agent and details pages">
 
@@ -34,7 +34,7 @@ English · [简体中文](README.zh-CN.md)
   - **Per agent** — today, range total, daily average, cache hit, output, **lines edited**, subagent share, **image-generation calls**, daily bars, model mix.
   - **Details** — cache composition, hit rate per agent, image calls per model, **cost per project** (bar length compares projects, segments split by agent).
 - **Your whole history.** The first launch back-fills every log already on disk; after that FSEvents keeps it live, reading only appended lines.
-- **Lines edited.** Every change counts `max(added, removed)` lines — `+1 −1` is 1, `+7 −5` and `+5 −7` are both 7.
+- **Lines edited.** Every change counts `max(added, removed)` lines — `+1 −1` is 1, `+7 −5` and `+5 −7` are both 7. Overwriting a file counts only the lines that changed; scratch files and lock files are left out.
 - **Image-generation calls**, counted per model and image count.
 - **Cost estimates** from a built-in price table, overridable in `~/.tokens/pricing.json`.
 - **English / 中文**, switchable from the right-click menu.
@@ -61,7 +61,14 @@ English · [简体中文](README.zh-CN.md)
 | **Grok** | `~/.grok/{sessions,archived_sessions}/*/*/updates.jsonl` | per-turn usage split by model; real API duration as generation time |
 | **DeepSeek Harness** | `~/.dsh/sessions/*/*/session.v4.jsonl.zstd` | appended zstd frames are decoded incrementally (needs the `zstd` command, e.g. `brew install zstd`) |
 
-Lines edited come from Claude's Edit / MultiEdit / Write, Codex's `apply_patch`, Antigravity's `edit_file` / `write_file` and DeepSeek Harness's `edit` / `write`; failed or rejected edits are not counted. Image calls are `img` / `imagegen` `generate|edit` commands run through an agent's shell tool (plus a built-in `image_gen` tool if one shows up).
+Lines edited come from Claude's Edit / MultiEdit / Write, Codex's `apply_patch`, Antigravity's `edit_file` / `write_file` and DeepSeek Harness's `edit` / `write`; failed or rejected edits are not counted.
+
+How an edit is counted:
+
+- **A change** is a run of consecutive added/removed lines and counts `max(added, removed)`. One call with several changes sums them.
+- **Overwriting an existing file** is diffed against the previous version, so only changed lines count. Claude Code and DeepSeek Harness log the original file or the diff with the tool result. Antigravity does not, so the parser remembers the last content it saw for each file in the session (written, fully read, or edited) and diffs against that; a file it has never seen counts as new.
+- **Not counted:** files under `/tmp`, `/private/tmp`, `/var/folders` and the agents' own directories (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.dsh`, `~/.grok` — plans, memory, scratch); lock files, `*.min.js`, `*.min.css`, `*.map`, and anything under `node_modules`, `.build`, `__pycache__`, `.venv`, `Pods`, `DerivedData`.
+- Documentation (`.md` and the like) counts like code. Image calls are `img` / `imagegen` `generate|edit` commands run through an agent's shell tool (plus a built-in `image_gen` tool if one shows up).
 
 ## Install
 
@@ -96,7 +103,7 @@ swift test                      # parser, ingest, edit-count and migration tests
 ### How the numbers are computed
 
 - **Total** = fresh input + cache read + cache write + output. **Cache hit** = cache read ÷ (fresh input + cache read + cache write). Days use your local time zone.
-- **tok/s** = a response's output tokens ÷ its generation time. Antigravity and Grok record the real duration; for the others it is estimated from log timestamps (Codex's estimate includes tool time). "Live" uses the last 90 seconds.
+- **tok/s** = a response's output tokens ÷ its generation time. Antigravity and Grok record the real duration; for the others it is estimated from log timestamps (Codex's estimate includes tool time). For Claude the time runs from the request to the last content block of the response. "Live" uses the last 90 seconds.
 - **Cost** uses per-model prices (default table derived from [cc-switch](https://github.com/farion1231/cc-switch)'s seed prices). Add or override models in `~/.tokens/pricing.json`:
 
   ```json

@@ -17,6 +17,31 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(p.consume(line: line(a), path: "/x/a.jsonl")?.key, "claude:msg1:req1")
     }
 
+    /// 一条响应拆成多行：耗时要算到最后一块，途中插进来的 user 行不能把起点往后挪。
+    func testClaudeGenTimeCoversWholeResponse() throws {
+        var p = ClaudeParser()
+        var out = ParseOutput()
+        func feed(_ s: String) { p.consume(line: Data(s.utf8), path: "/x.jsonl", into: &out) }
+        feed(#"{"type":"user","timestamp":"2026-11-22T01:00:00.000Z","message":{"role":"user","content":"go"}}"#)
+        // 第一块（一句话）3 秒后写完，这时 usage 里的输出还很少
+        feed(#"{"type":"assistant","timestamp":"2026-11-22T01:00:03.000Z","sessionId":"s","cwd":"/p","requestId":"r","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"output_tokens":40}}}"#)
+        // 用户在输出途中插了一句
+        feed(#"{"type":"user","timestamp":"2026-11-22T01:00:30.000Z","message":{"role":"user","content":"还有…"}}"#)
+        // 最后一块（大文件写入）60 秒时写完，输出 6000
+        feed(#"{"type":"assistant","timestamp":"2026-11-22T01:01:00.000Z","sessionId":"s","cwd":"/p","requestId":"r","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"t","name":"Read","input":{}}],"usage":{"input_tokens":10,"output_tokens":6000}}}"#)
+        XCTAssertEqual(out.events.map(\.genMs), [3000, 60000])
+
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tn-gen-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try Store(path: dir.appendingPathComponent("t.db").path)
+        try store.upsert(out.events)
+        let row = try store.db.query("SELECT output, gen_ms FROM events")
+        XCTAssertEqual(row.count, 1)
+        XCTAssertEqual(row[0][0].int, 6000)
+        XCTAssertEqual(row[0][1].int, 60000)   // 100 tok/s，而不是 6000 ÷ 3 秒
+    }
+
     func testClaudeSkipsSyntheticAndEmpty() {
         var p = ClaudeParser()
         let syn = #"{"type":"assistant","timestamp":"2026-11-22T01:00:04Z","message":{"id":"m","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}"#

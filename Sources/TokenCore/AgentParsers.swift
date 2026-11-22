@@ -26,11 +26,24 @@ func quickString(_ line: Data, _ key: String) -> String? {
 /// 2. 会话正文里的 `changed setting \`Model Selection\` from X to Y`（显示名，换成 ID）；
 /// 3. 都没有记 unknown，不猜。
 /// 项目目录与是否子代理来自 `conversation_summaries.db`。编辑来自 `edit_file` / `write_file` 工具调用。
+///
+/// `write_file` 不区分新建和覆盖，日志里也没有原文件。为了让覆盖只算改动的行，这里记着会话里每个文件
+/// 最后一次已知的内容（只存每行的哈希）：之前写入的、`read_file` 完整读到的、`edit_file` 改过之后的。
+/// 覆盖时拿它做 diff；从没见过的文件按新建算。
 struct AntigravityParser: LogParser {
     var selectedModel: String?
     var lastStepTs: Int64?
+    /// 路径 → 已知内容的行哈希（UInt32 依次拼成的字节）
+    var known: [String: Data] = [:]
+    /// `known` 的新旧顺序，超出上限时丢最旧的
+    var knownOrder: [String] = []
+    /// 还没回来的 `read_file`：结果所在的步骤号 → 路径
+    var pendingReads: [Int: String] = [:]
 
     private static let markers = ["PLANNER_RESPONSE", "Model Selection"].map(bytes)
+    private static let generic = bytes("GENERIC")
+    static let knownLimit = 256
+    static let maxTrackedLines = 20_000
 
     init() {}
 
@@ -43,6 +56,12 @@ struct AntigravityParser: LogParser {
     mutating func consume(line: Data, path: String, into out: inout ParseOutput) {
         let stepTs = quickString(line, "created_at").flatMap(Time.parseMs)
         defer { if let stepTs { lastStepTs = stepTs } }
+        if !pendingReads.isEmpty, lineContains(line, Self.generic), let obj = parseJSON(line),
+           obj["type"] as? String == "GENERIC", let step = (obj["step_index"] as? NSNumber)?.intValue,
+           let path = pendingReads.removeValue(forKey: step) {
+            if let lines = (obj["content"] as? String).flatMap(Self.fullRead) { remember(path, lines) }
+            return
+        }
         guard Self.markers.contains(where: { lineContains(line, $0) }), let obj = parseJSON(line) else { return }
         let type = obj["type"] as? String
         if type == "USER_INPUT" {
@@ -67,25 +86,47 @@ struct AntigravityParser: LogParser {
                 genMs: plausibleGap(ts, since: lastStepTs)))
         }
 
+        pendingReads = [:]
         for (i, call) in ((obj["tool_calls"] as? [[String: Any]]) ?? []).enumerated() {
             let args = call["args"] as? [String: Any] ?? [:]
-            var change = EditChange()
-            switch call["name"] as? String {
-            case "edit_file", "replace_file_content":
-                change = EditCount.replace(old: args["Target"] as? String ?? args["TargetContent"] as? String ?? "",
-                                           new: args["Replacement"] as? String ?? args["ReplacementContent"] as? String ?? "")
-            case "multi_replace_file_content":
-                for c in args["ReplacementChunks"] as? [[String: Any]] ?? [] {
-                    change += EditCount.replace(old: c["TargetContent"] as? String ?? "",
-                                                new: c["ReplacementContent"] as? String ?? "")
-                }
-            case "write_file", "write_to_file":
-                change = EditCount.write(args["Content"] as? String ?? args["CodeContent"] as? String ?? "")
-            case "run_command":
+            let name = call["name"] as? String
+            if name == "run_command" {
                 out.images += ImageCalls.events(in: args["CommandLine"] as? String ?? "",
                                                 keyPrefix: "antigravity:\(session):\(step):\(i)", agent: .antigravity,
                                                 ts: ts, cwd: "", session: session)
                 continue
+            }
+            let path = args["Path"] as? String ?? args["TargetFile"] as? String ?? args["AbsolutePath"] as? String ?? ""
+            // 不计入的文件（agent 的草稿目录等）连内容也不用记
+            guard EditCount.isCounted(path: path) else { continue }
+            var change = EditChange()
+            switch name {
+            case "read_file":
+                // 每个工具调用的结果依次落在后面的步骤里
+                if !path.isEmpty { pendingReads[step + 1 + i] = path }
+                continue
+            case "edit_file", "replace_file_content":
+                let old = args["Target"] as? String ?? args["TargetContent"] as? String ?? ""
+                let new = args["Replacement"] as? String ?? args["ReplacementContent"] as? String ?? ""
+                change = EditCount.replace(old: old, new: new)
+                applyEdit(path, old: old, new: new)
+            case "multi_replace_file_content":
+                for c in args["ReplacementChunks"] as? [[String: Any]] ?? [] {
+                    let old = c["TargetContent"] as? String ?? "", new = c["ReplacementContent"] as? String ?? ""
+                    change += EditCount.replace(old: old, new: new)
+                    applyEdit(path, old: old, new: new)
+                }
+            case "write_file", "write_to_file":
+                let content = args["Content"] as? String ?? args["CodeContent"] as? String ?? ""
+                let lines = EditCount.hashes(content)
+                let before = known[path].map(Self.unpack)
+                if Self.isTrue(args["Append"]) {
+                    change = EditCount.write(content)
+                    if let before { remember(path, before + lines) }
+                } else {
+                    change = before.map { EditCount.diff($0, lines) } ?? EditCount.write(content)
+                    remember(path, lines)
+                }
             default:
                 continue
             }
@@ -94,6 +135,68 @@ struct AntigravityParser: LogParser {
                                            ts: ts, cwd: "", session: session, change: change))
             }
         }
+    }
+
+    // MARK: 已知的文件内容
+
+    static func isTrue(_ v: Any?) -> Bool {
+        (v as? Bool) ?? ((v as? String)?.lowercased() == "true")
+    }
+
+    static func pack(_ lines: [UInt32]) -> Data {
+        lines.withUnsafeBufferPointer { Data(buffer: $0) }
+    }
+
+    static func unpack(_ data: Data) -> [UInt32] {
+        [UInt32](unsafeUninitializedCapacity: data.count / 4) { buf, n in
+            n = data.copyBytes(to: buf) / 4
+        }
+    }
+
+    private mutating func remember(_ path: String, _ lines: [UInt32]) {
+        knownOrder.removeAll { $0 == path }
+        guard !path.isEmpty, lines.count <= Self.maxTrackedLines else {
+            known[path] = nil
+            return
+        }
+        known[path] = Self.pack(lines)
+        knownOrder.append(path)
+        while knownOrder.count > Self.knownLimit { known[knownOrder.removeFirst()] = nil }
+    }
+
+    /// 把一次字符串替换应用到记着的内容上。只有被替换的部分正好是整行时才对得上；
+    /// 对不上就留着旧内容不动——之后覆盖时最多把这次改的几行再算一遍，比当成全新文件准得多。
+    private mutating func applyEdit(_ path: String, old: String, new: String) {
+        guard let data = known[path] else { return }
+        let lines = Self.unpack(data), target = EditCount.hashes(old)
+        guard !target.isEmpty, target.count <= lines.count else { return }
+        for start in 0...(lines.count - target.count) where lines[start] == target[0] {
+            if Array(lines[start..<(start + target.count)]) == target {
+                remember(path, Array(lines[..<start]) + EditCount.hashes(new) + Array(lines[(start + target.count)...]))
+                return
+            }
+        }
+    }
+
+    /// `read_file` 的结果：`…\nShowing lines 1-59 of 59\n1: 第一行\n2: 第二行…`。只认读完整个文件的；
+    /// 分段读、按字节偏移读的返回 nil。
+    static func fullRead(_ content: String) -> [UInt32]? {
+        guard let r = content.range(of: "\nShowing lines 1-") else { return nil }
+        let rest = content[r.upperBound...]
+        guard let nl = rest.firstIndex(of: "\n") else { return nil }
+        let counts = rest[..<nl].components(separatedBy: " of ")
+        guard counts.count == 2, let n = Int(counts[0]), n == Int(counts[1]), n > 0, n <= maxTrackedLines else { return nil }
+        var out: [UInt32] = []
+        out.reserveCapacity(n)
+        for line in rest[rest.index(after: nl)...].split(separator: "\n", omittingEmptySubsequences: false) {
+            if out.count == n { break }
+            let prefix = "\(out.count + 1):"
+            guard line.hasPrefix(prefix) else { return nil }
+            var text = line.dropFirst(prefix.count)
+            if text.first == " " { text = text.dropFirst() }
+            out.append(EditCount.hash(text))
+        }
+        return out.count == n ? out : nil
     }
 
     /// `changed setting \`Model Selection\` from X to Gemini 3.8 Flash (High). …` → 显示名。
@@ -254,6 +357,7 @@ struct GrokParser: LogParser {
 /// 用量挂在 `assistant/message` 上；三种 token 互不重叠，`inputTokens` 就是新输入。
 /// 生成耗时按同一步 `step/start` 到 `assistant/message` 的间隔估算。
 /// 编辑来自 `tool/call` 的 `edit` / `write`，对应的 `tool/result` 没报错才算。
+/// `write` 覆盖已有文件时，结果的 `meta`（`operation: update`）带着逐段的新旧文本，按它算改动的行。
 struct DeepSeekParser: LogParser {
     var session = ""
     var cwd = ""
@@ -327,7 +431,8 @@ struct DeepSeekParser: LogParser {
                   let argText = data["arguments"] as? String,
                   let args = parseJSON(Data(argText.utf8)) else { return }
             var change = EditChange()
-            switch data["name"] as? String {
+            let name = data["name"] as? String
+            switch name {
             case "edit":
                 change = EditCount.replace(old: args["old_string"] as? String ?? "", new: args["new_string"] as? String ?? "")
             case "write":
@@ -339,15 +444,24 @@ struct DeepSeekParser: LogParser {
             default:
                 return
             }
-            if !change.isEmpty {
-                pending[callId] = PendingEdit(ts: ts, cwd: cwd, session: session, change: change)
+            let path = args["path"] as? String ?? args["file_path"] as? String ?? args["filePath"] as? String ?? ""
+            if !change.isEmpty, EditCount.isCounted(path: path, cwd: cwd) {
+                pending[callId] = PendingEdit(ts: ts, cwd: cwd, session: session, change: change,
+                                              path: path, isWrite: name == "write")
                 pending.cap()
             }
         case "tool/result":
             let msg = data["message"] as? [String: Any] ?? [:]
             guard let callId = (msg["toolCallId"] as? String) ?? ((msg["source"] as? [String: Any])?["callId"] as? String),
-                  let p = pending.removeValue(forKey: callId) else { return }
+                  var p = pending.removeValue(forKey: callId) else { return }
             if (msg["isError"] as? Bool) == true { return }
+            if p.isWrite, let meta = data["meta"] as? [String: Any], meta["operation"] as? String == "update",
+               let diffs = meta["diffs"] as? [[String: Any]] {
+                p.change = diffs.reduce(EditChange()) {
+                    $0 + EditCount.replace(old: $1["oldText"] as? String ?? "", new: $1["newText"] as? String ?? "")
+                }
+            }
+            guard !p.change.isEmpty else { return }
             out.edits.append(EditEvent(key: "deepseek:\(p.session):\(callId)", agent: .deepseek, ts: p.ts,
                                        cwd: p.cwd, session: p.session, change: p.change))
         default:

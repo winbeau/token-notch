@@ -203,15 +203,23 @@ struct AgentPage: View {
                 StatCell(label: tr.subagentShare, value: TokenFormat.percent(a?.subagentShare))
                 // 只有用过生图的 agent 才多出这一格
                 if (model.snapshot.stats(.all).agent(agent)?.imageCalls ?? 0) > 0 {
-                    StatCell(label: tr.imageCalls, value: tr.imageCallsValue(a?.imageCalls ?? 0, a?.images ?? 0))
+                    StatCell(label: tr.imageCalls, value: "\(a?.imageCalls ?? 0)",
+                             detail: tr.imageCallsDetail(a?.imageCalls ?? 0, a?.images ?? 0))
                 }
             }
 
             HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(tr.rangeTitle(s)).font(.system(size: 11)).foregroundStyle(Palette.text2)
-                    DailyBars(days: s.daily, agent: agent, height: 100)
-                        .padding(.top, 24)
+                    // 只有一天时按天画只剩一根柱子，改成一个模型一根
+                    Group {
+                        if s.daily.count > 1 {
+                            DailyBars(days: s.daily, agent: agent, height: 100)
+                        } else {
+                            ModelBars(models: Array(models.prefix(5)), color: Palette.agent(agent), height: 100)
+                        }
+                    }
+                    .padding(.top, 24)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -257,6 +265,8 @@ struct DetailPage: View {
             (tr.output, t.output, Palette.grayBar),
         ]
 
+        VStack(alignment: .leading, spacing: 16) {
+        // 两列等高：右列的合计行贴底，和左列最后一行对齐
         HStack(alignment: .top, spacing: 28) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(tr.cacheHit).font(.system(size: 11)).foregroundStyle(Palette.text2)
@@ -290,34 +300,71 @@ struct DetailPage: View {
                         Track(fraction: a.totals.cacheHitRate ?? 0, color: Palette.agent(a.agent))
                     }
                 }
-                if s.imageCalls > 0 {
-                    Rectangle().fill(Palette.track).frame(height: 1)
-                    Text(tr.imageTitle(s.imageCalls, s.images)).font(.system(size: 11)).foregroundStyle(Palette.text2)
-                    ForEach(s.imageModels.prefix(3)) { m in
-                        HStack {
-                            Text(m.model).foregroundStyle(Color(white: 0.9)).lineLimit(1)
-                            Spacer()
-                            Text(tr.imageModelRow(m.calls)).foregroundStyle(Palette.text2)
-                        }
-                        .font(.system(size: 12))
-                    }
-                }
             }
             .frame(width: 250)
 
-            ProjectList(stats: s, t: tr)
-                .frame(maxWidth: .infinity)
+            // 左列每多一个 agent 高一行，右列跟着多列一个项目，两列差不多高
+            ProjectList(stats: s, t: tr, limit: min(8, max(4, s.agents.count + 3)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .fixedSize(horizontal: false, vertical: true)
+
+        if s.imageCalls > 0 {
+            ImageStrip(stats: s, t: tr)
+        }
+        }
+    }
+}
+
+/// 明细页底部通栏的一行：生图次数、张数，右侧按模型列出（放不下就少列几个）。
+struct ImageStrip: View {
+    var stats: RangeStats
+    var t: L10n
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(t.imageLabel).font(.system(size: 11)).foregroundStyle(Palette.text2)
+            Text(t.imageSummary(stats.imageCalls, stats.images)).foregroundStyle(Color(white: 0.9))
+                .lineLimit(1).fixedSize()
+            Spacer(minLength: 16)
+            ViewThatFits(in: .horizontal) {
+                models(3)
+                models(2)
+                models(1)
+                Color.clear.frame(width: 0, height: 0)
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.top, 12)
+        .overlay(alignment: .top) { Rectangle().fill(Palette.track).frame(height: 1) }
+    }
+
+    func models(_ n: Int) -> some View {
+        let list = stats.imageModels
+        return HStack(alignment: .firstTextBaseline, spacing: 16) {
+            ForEach(list.prefix(n)) { m in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(m.model).foregroundStyle(Palette.text2)
+                    Text("\(m.calls)")
+                }
+            }
+            if list.count > n {
+                Text("+\(list.count - n)").foregroundStyle(Palette.text3)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
 struct ProjectList: View {
     var stats: RangeStats
     var t: L10n
+    var limit = 6
 
     var body: some View {
-        let top = Array(stats.projects.prefix(6))
-        let rest = stats.projects.dropFirst(6)
+        let top = Array(stats.projects.prefix(limit))
+        let rest = stats.projects.dropFirst(limit)
         let restTotal = rest.reduce(Int64(0)) { $0 + $1.total }
         let restCost = rest.reduce(0.0) { $0 + $1.cost }
         let maxP = max(1, top.first?.total ?? 1)
@@ -383,6 +430,7 @@ struct ProjectList: View {
                 }
                 .font(.system(size: 12))
             }
+            Spacer(minLength: 0)
             HStack(spacing: 10) {
                 Text(t.total)
                 Spacer()

@@ -71,6 +71,10 @@ struct PendingEdit: Codable, Equatable {
     var cwd: String
     var session: String
     var change: EditChange
+    /// 被编辑的文件；结果回来时用它核对工具结果说的是不是同一个文件
+    var path = ""
+    /// 整文件写入：新建时 `change` 就是全部行数；覆盖已有文件时要等结果里的 diff
+    var isWrite = false
 }
 
 extension Dictionary where Key == String, Value == PendingEdit {
@@ -88,9 +92,18 @@ extension Dictionary where Key == String, Value == PendingEdit {
 /// 每条 assistant 行带 `message.usage`；同一响应按内容块拆成多行，usage 相同，
 /// 用 `message.id + requestId` 去重。`input_tokens` 本身就是新输入（不含缓存）。
 /// 编辑来自 assistant 行里的 `tool_use`（Edit / MultiEdit / Write），等对应的 `tool_result` 没报错才算。
+/// 结果行的 `toolUseResult` 带着这次编辑的真实 diff（`structuredPatch`，覆盖写入时还有 `originalFile`），
+/// 有就以它为准：覆盖已有文件只算改动的行，`replace_all` 的多处替换也都能算上。
+///
+/// 生成耗时：从这次请求发出（上一条 user 行）到这条响应**最后一块**内容写完。一条响应的各行时间戳不同，
+/// 每行都按同一个起点算耗时，入库时取最大的那个；只算到第一块的话，短短一句话后面跟一个大文件写入，
+/// 速度会被算成上千 tok/s。
 struct ClaudeParser: LogParser {
     var lastUserTs: Int64?
     var pending: [String: PendingEdit] = [:]
+    /// 正在输出的那条响应和它的起点；响应输出途中插进来的 user 行不改变起点
+    var currentMessage = ""
+    var currentStart: Int64?
 
     private static let usageKey = bytes("\"usage\"")
     private static let userType = bytes("\"type\":\"user\"")
@@ -133,6 +146,10 @@ struct ClaudeParser: LogParser {
 
         let id = (msg["id"] as? String) ?? (obj["uuid"] as? String) ?? "\(ts)"
         let req = (obj["requestId"] as? String) ?? ""
+        if id != currentMessage {
+            currentMessage = id
+            currentStart = lastUserTs
+        }
         let sub = (obj["isSidechain"] as? Bool) ?? path.contains("/subagents/")
         out.events.append(UsageEvent(
             key: "claude:\(id):\(req)",
@@ -146,7 +163,7 @@ struct ClaudeParser: LogParser {
             cacheRead: cacheRead,
             cacheWrite: cacheWrite,
             output: output,
-            genMs: plausibleGap(ts, since: lastUserTs)
+            genMs: plausibleGap(ts, since: currentStart)
         ))
     }
 
@@ -155,8 +172,15 @@ struct ClaudeParser: LogParser {
         guard let blocks = content as? [[String: Any]] else { return }
         for b in blocks where b["type"] as? String == "tool_use" {
             guard let id = b["id"] as? String, let input = b["input"] as? [String: Any] else { continue }
+            let name = b["name"] as? String
+            if name == "Bash" {
+                images += ImageCalls.events(in: input["command"] as? String ?? "", keyPrefix: "claude:\(id)",
+                                            agent: .claude, ts: ts, cwd: cwd, session: session)
+                continue
+            }
+            let path = input["file_path"] as? String ?? ""
             var change = EditChange()
-            switch b["name"] as? String {
+            switch name {
             case "Edit":
                 change = EditCount.replace(old: input["old_string"] as? String ?? "", new: input["new_string"] as? String ?? "")
             case "MultiEdit":
@@ -165,15 +189,12 @@ struct ClaudeParser: LogParser {
                 }
             case "Write":
                 change = EditCount.write(input["content"] as? String ?? "")
-            case "Bash":
-                images += ImageCalls.events(in: input["command"] as? String ?? "", keyPrefix: "claude:\(id)",
-                                            agent: .claude, ts: ts, cwd: cwd, session: session)
-                continue
             default:
                 continue
             }
-            if !change.isEmpty {
-                pending[id] = PendingEdit(ts: ts, cwd: cwd, session: session, change: change)
+            if !change.isEmpty, EditCount.isCounted(path: path, cwd: cwd) {
+                pending[id] = PendingEdit(ts: ts, cwd: cwd, session: session, change: change,
+                                          path: path, isWrite: name == "Write")
             }
         }
         pending.cap()
@@ -185,12 +206,29 @@ struct ClaudeParser: LogParser {
               pending.keys.contains(where: { lineContains(line, bytes($0)) }),
               let obj = obj ?? parseJSON(line),
               let blocks = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] else { return }
+        let result = obj["toolUseResult"] as? [String: Any]
         for b in blocks where b["type"] as? String == "tool_result" {
-            guard let id = b["tool_use_id"] as? String, let p = pending.removeValue(forKey: id) else { continue }
+            guard let id = b["tool_use_id"] as? String, var p = pending.removeValue(forKey: id) else { continue }
             if (b["is_error"] as? Bool) == true { continue }
+            if let result, (result["filePath"] as? String) == p.path, let exact = Self.exactChange(result, isWrite: p.isWrite) {
+                p.change = exact
+            }
+            guard !p.change.isEmpty else { continue }
             out.edits.append(EditEvent(key: "claude:\(id)", agent: .claude, ts: p.ts, cwd: p.cwd,
                                        session: p.session, change: p.change))
         }
+    }
+
+    /// 工具结果里的真实改动。没有可用的 diff（比如新建文件，`structuredPatch` 是空的）返回 nil，沿用发出时算的。
+    static func exactChange(_ result: [String: Any], isWrite: Bool) -> EditChange? {
+        if let hunks = result["structuredPatch"] as? [[String: Any]], !hunks.isEmpty {
+            return hunks.reduce(EditChange()) { $0 + EditCount.hunk($1["lines"] as? [String] ?? []) }
+        }
+        if isWrite, result["type"] as? String == "update",
+           let original = result["originalFile"] as? String, let content = result["content"] as? String {
+            return EditCount.replace(old: original, new: content)
+        }
+        return nil
     }
 }
 
@@ -302,7 +340,7 @@ struct CodexParser: LogParser {
                                             ts: ts, cwd: cwd, session: sid)
         }
         for (i, patch) in EditCount.patches(in: text).enumerated() {
-            let change = EditCount.patch(patch)
+            let change = EditCount.patch(patch) { EditCount.isCounted(path: $0, cwd: cwd) }
             guard !change.isEmpty else { continue }
             out.edits.append(EditEvent(key: "codex:\(sid):\(callId):\(i)", agent: .codex, ts: ts,
                                        cwd: cwd, session: sid, change: change))

@@ -277,12 +277,21 @@ struct Metric: View {
 struct StatCell: View {
     var label: String
     var value: String
+    /// 数字后面的小号说明（单位、次要数字），和数字同一行
+    var detail: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.system(size: 11)).foregroundStyle(Palette.text2)
-            Text(value).font(.system(size: 17, weight: .semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value).font(.system(size: 17, weight: .semibold))
+                if !detail.isEmpty {
+                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.text2)
+                }
+            }
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -326,6 +335,47 @@ struct Track: View {
             }
         }
         .frame(height: height)
+    }
+}
+
+/// 单日范围下的柱图：一个模型一根柱子，顺序和配色同右侧的模型列表，柱顶标数值。
+struct ModelBars: View {
+    var models: [ModelStat]
+    var color: Color
+    var height: CGFloat = 100
+
+    var body: some View {
+        let maxV = max(1, models.map(\.totals.total).max() ?? 1)
+        VStack(spacing: 6) {
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(Array(models.enumerated()), id: \.element.id) { i, m in
+                    VStack(spacing: 4) {
+                        Spacer(minLength: 0)
+                        Text(TokenFormat.compact(m.totals.total))
+                            .font(.system(size: 11)).foregroundStyle(Palette.text2).lineLimit(1).fixedSize()
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(i == 0 ? color : Palette.muted)
+                            .frame(maxWidth: 72)
+                            .frame(height: max(2, (height - 18) * CGFloat(m.totals.total) / CGFloat(maxV)))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                if models.isEmpty {
+                    Rectangle().fill(Palette.track).frame(height: 1)
+                }
+            }
+            .frame(height: height)
+            HStack(spacing: 8) {
+                ForEach(Array(models.enumerated()), id: \.element.id) { i, m in
+                    Text(TokenFormat.modelName(m.model))
+                        .font(.system(size: 11))
+                        .foregroundStyle(i == 0 ? Palette.text : Palette.text3)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                }
+                if models.isEmpty { Text(" ").font(.system(size: 11)) }
+            }
+        }
     }
 }
 

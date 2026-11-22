@@ -18,7 +18,8 @@ public enum DemoData {
     }
 
     static let projects = ["~/code/atlas-web", "~/code/token-notch", "~/code/ml-pipeline", "~/code/api-gateway",
-                           "~/code/ios-client", "~/code/docs-site", "~/code/infra"]
+                           "~/code/ios-client", "~/code/docs-site", "~/code/infra", "~/code/design-tokens",
+                           "~/code/billing-svc", "~/code/cli-tools"]
 
     /// (agent, 每日响应数, 模型及权重, 每次响应的上下文规模)
     static let agents: [(Agent, Int, [(String, Double)], Double)] = [

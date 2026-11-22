@@ -66,13 +66,15 @@ struct L10n {
     var dailyAvg: String { s("日均", "Daily avg") }
     var subagentShare: String { s("子代理占比", "Subagents") }
     var imageCalls: String { s("生图调用", "Image calls") }
-    func imageCallsValue(_ calls: Int64, _ images: Int64) -> String {
-        lang == .en ? "\(calls)" + (images != calls ? " · \(images) img" : "") : "\(calls) 次" + (images != calls ? " · \(images) 张" : "")
+    /// 生图格子里数字后面的小字：次 · 15 张 / calls · 15 images（张数和次数相同时不重复写）。
+    func imageCallsDetail(_ calls: Int64, _ images: Int64) -> String {
+        let extra = images != calls
+        return lang == .en ? (extra ? "· \(images) img" : "") : "次" + (extra ? " · \(images) 张" : "")
     }
-    func imageTitle(_ calls: Int64, _ images: Int64) -> String {
-        lang == .en ? "Image generation · \(calls) call\(calls == 1 ? "" : "s") · \(images) image\(images == 1 ? "" : "s")" : "生图 · \(calls) 次调用 · \(images) 张"
+    var imageLabel: String { s("生图", "Image generation") }
+    func imageSummary(_ calls: Int64, _ images: Int64) -> String {
+        lang == .en ? "\(calls) call\(calls == 1 ? "" : "s") · \(images) image\(images == 1 ? "" : "s")" : "\(calls) 次调用 · \(images) 张"
     }
-    func imageModelRow(_ calls: Int64) -> String { lang == .en ? "\(calls) call\(calls == 1 ? "" : "s")" : "\(calls) 次" }
     var cacheRead: String { s("缓存读", "Cache read") }
     var cacheWrite: String { s("缓存写", "Cache write") }
     var freshInput: String { s("新输入", "Fresh input") }

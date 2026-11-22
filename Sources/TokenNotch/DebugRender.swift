@@ -32,6 +32,8 @@ enum DebugRender {
             ("10-agent-antigravity-all", .expanded, nil, .agent(.antigravity), .all),
             ("11-agent-grok-all", .expanded, nil, .agent(.grok), .all),
             ("12-agent-codex-all", .expanded, nil, .agent(.codex), .all),
+            ("13-agent-claude-today", .expanded, nil, .agent(.claude), .today),
+            ("14-agent-grok-today", .expanded, nil, .agent(.grok), .today),
         ]
         for lang in Lang.allCases {
         for (name, state, active, tab, range) in cases {
