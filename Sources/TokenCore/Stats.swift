@@ -91,6 +91,13 @@ public struct LiveStat: Sendable {
     /// 最近 90 秒内完成的响应的生成速度。
     public var tokPerSec: Double?
 
+    public init(agent: Agent, today: Int64, lastActivity: Date?, tokPerSec: Double?) {
+        self.agent = agent
+        self.today = today
+        self.lastActivity = lastActivity
+        self.tokPerSec = tokPerSec
+    }
+
     public func isActive(now: Date = Date(), window: TimeInterval = 20) -> Bool {
         guard let lastActivity else { return false }
         return now.timeIntervalSince(lastActivity) <= window
