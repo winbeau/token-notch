@@ -89,7 +89,7 @@ const AGENTS = [
 ];
 const AGENT = Object.fromEntries(AGENTS.map(a => [a.id, a]));
 const PROJECTS = ['atlas-web', 'token-notch', 'ml-pipeline', 'api-gateway', 'ios-client', 'docs-site', 'infra', 'design-tokens', 'billing-svc', 'cli-tools', 'landing'];
-const LIVE = { claude: 128, codex: 46 };
+const LIVE = { claude: 128, codex: 46, deepseek: 96, antigravity: 58 };
 const DAYS = 30;
 
 const days = (() => {
@@ -170,7 +170,8 @@ const rangeTitle = s => (s.range === 'all' ? T().allTitle(T().date(s.first), s.n
 
 // ---------------------------------------------------------------- 面板
 const view = { state: 'idle', tab: 'overview', range: 'week', rotation: 0 };
-const live = { claude: 128, codex: 46 };
+const live = { ...LIVE };
+const liveSum = () => Object.values(live).reduce((x, y) => x + y, 0);
 const island = $('#island'), panel = $('#panel'), wings = $('#wings');
 
 function metric(label, value, color, key) {
@@ -209,7 +210,7 @@ function modelBars(x, a, height) {
 }
 
 function pageOverview(s) {
-  const t = T(), liveTotal = live.claude + live.codex;
+  const t = T(), liveTotal = liveSum();
   const peak = s.slice.reduce((best, d) => {
     const v = Object.values(d.agents).reduce((x, y) => x + y, 0);
     return v > best.v ? { v, d } : best;
@@ -334,14 +335,14 @@ function setState(next) {
 // ---------------------------------------------------------------- 交互与自动播放
 let auto = true, timer = 0, step = 0, resume = 0, heroVisible = true;
 const SCRIPT = [
-  [() => { view.tab = 'overview'; view.range = 'week'; setState('idle'); }, 1500],
-  [() => setState('active'), 2400],
-  [rotateWings, 2300],
-  [() => setState('expanded'), 3400],
-  [() => { view.tab = 'claude'; renderPanel(); }, 3000],
-  [() => { view.tab = 'detail'; view.range = 'month'; renderPanel(); }, 3400],
-  [() => { view.tab = 'overview'; view.range = 'all'; renderPanel(); }, 3000],
-  [() => setState('active'), 2200],
+  [() => { view.tab = 'overview'; view.range = 'week'; setState('idle'); }, 900],
+  [() => setState('active'), 1600],
+  [rotateWings, 1700],
+  [() => setState('expanded'), 2600],
+  [() => { view.tab = 'claude'; renderPanel(); }, 2200],
+  [() => { view.tab = 'detail'; view.range = 'month'; renderPanel(); }, 2600],
+  [() => { view.tab = 'overview'; view.range = 'all'; renderPanel(); }, 2200],
+  [() => setState('active'), 1500],
 ];
 function play() {
   clearTimeout(timer);
@@ -379,7 +380,7 @@ setInterval(() => {
   if (document.hidden) return;
   for (const id in LIVE) live[id] = Math.round(LIVE[id] * (.9 + Math.random() * .22));
   for (const id in LIVE) $$(`[data-live="${id}"]`).forEach(el => { el.textContent = live[id] + ' tok/s'; });
-  const total = live.claude + live.codex;
+  const total = liveSum();
   $$('[data-live="total"]').forEach(el => { el.textContent = total + ' tok/s'; });
 }, 1000);
 setInterval(() => { if (view.state === 'active' && !auto) rotateWings(); }, 4000);
@@ -393,22 +394,44 @@ function scale() {
 }
 new ResizeObserver(scale).observe(wrap);
 
-// 终端里滚动的几行（虚构）
-const TERM = [
-  ['u', '› add retry with backoff to the uploader'], ['d', '  Read   src/upload/client.ts'], ['o', '  Edit   src/upload/client.ts   +18 −4'],
-  ['o', '  Edit   src/upload/retry.ts    +41'], ['d', '  Bash   npm test -- upload'], ['g', '  ✓ 42 passed (3.1s)'],
-  ['u', '› now cover the timeout path'], ['d', '  Read   src/upload/retry.test.ts'], ['o', '  Edit   src/upload/retry.test.ts   +27 −2'], ['g', '  ✓ 45 passed (3.4s)'],
+// 桌面上的几个 agent 窗口（内容是虚构的），和演示视频里的一致。类名：u 提示、d 次要、e 编辑、g 通过、p 普通
+const TERMS = [
+  { id: 'claude', title: 'atlas-web — claude', keep: 6, lines: [
+    ['u', '› add retry with backoff to the uploader'], ['d', '  Read   src/upload/client.ts'], ['e', '  Edit   src/upload/client.ts  +18 −4'],
+    ['e', '  Edit   src/upload/retry.ts   +41'], ['d', '  Bash   npm test -- upload'], ['g', '  ✓ 42 passed (3.1s)'],
+    ['u', '› now cover the timeout path'], ['d', '  Read   src/upload/retry.test.ts'], ['e', '  Edit   src/upload/retry.test.ts  +27 −2'], ['g', '  ✓ 45 passed (3.4s)']] },
+  { id: 'codex', title: 'api-gateway — codex', keep: 5, lines: [
+    ['u', '› rate-limit the /export endpoint'], ['d', '• Ran rg "export" src/routes'], ['p', '• Edited src/routes/export.ts (+24 −3)'],
+    ['p', '• Edited src/limits.ts (+31)'], ['d', '• Ran pnpm test export'], ['g', '  18 passed'],
+    ['u', '› add a 429 response to the OpenAPI spec'], ['p', '• Edited openapi.yaml (+12)']] },
+  { id: 'deepseek', title: 'ml-pipeline — dsh', keep: 5, lines: [
+    ['u', '> profile the tokenizer stage'], ['d', '[read] pipeline/tokenize.py'], ['d', '[bash] python -m cProfile -s cumtime'],
+    ['e', '[edit] pipeline/tokenize.py +12 −9'], ['d', '[bash] pytest -q tests/tokenize'], ['g', '31 passed in 2.8s'],
+    ['u', '> batch the vocab lookups'], ['e', '[edit] pipeline/vocab.py +22 −15']] },
+  { id: 'antigravity', title: 'ios-client — Antigravity', keep: 5, lines: [
+    ['u', 'Add an offline cache to the feed'], ['g', '✓ Read FeedStore.swift'], ['g', '✓ Read FeedView.swift'],
+    ['e', '✓ Edit FeedStore.swift  +36 −8'], ['e', '✓ Write FeedCache.swift  +74'], ['d', '● Running xcodebuild test'],
+    ['g', '✓ 23 tests passed'], ['u', 'Evict entries older than 7 days']] },
 ];
-let termAt = 0;
-const term = $('#term');
-function termLine() {
-  const [cls, text] = TERM[termAt++ % TERM.length];
-  const el = document.createElement('div'); el.className = cls; el.textContent = text;
-  term.append(el);
-  while (term.children.length > 7) term.firstChild.remove();
-}
-for (let i = 0; i < 5; i++) termLine();
-setInterval(() => { if (!document.hidden && heroVisible) termLine(); }, 1500);
+const desk = $('#desk');
+TERMS.forEach((w, i) => {
+  const el = document.createElement('div');
+  el.className = 'term t-' + w.id;
+  el.style.setProperty('--c', AGENT[w.id].color);
+  el.innerHTML = `<div class="term-bar"><i></i><i></i><i></i><span>${w.title}</span><b></b></div><div class="term-body"></div>`;
+  desk.append(el);
+  const body = $('.term-body', el);
+  let at = i * 2;
+  const push = () => {
+    const [cls, text] = w.lines[at++ % w.lines.length];
+    const line = document.createElement('div'); line.className = cls; line.textContent = text;
+    body.append(line);
+    while (body.children.length > w.keep) body.firstChild.remove();
+  };
+  for (let k = 0; k < w.keep; k++) push();
+  // 几个窗口错开滚动
+  setTimeout(() => setInterval(() => { if (!document.hidden && heroVisible) push(); }, 900), i * 230);
+});
 
 // ---------------------------------------------------------------- 语言
 $$('[data-i18n]').forEach(el => { EN[el.dataset.i18n] = el.innerHTML; });
