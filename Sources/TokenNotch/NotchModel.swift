@@ -48,13 +48,17 @@ final class NotchModel: ObservableObject {
     @Published var rotation = 0
     /// 界面语言，右键菜单切换，存在 UserDefaults。调试可用 `TOKEN_NOTCH_LANG=en` 覆盖。
     @Published var lang: Lang = ProcessInfo.processInfo.environment["TOKEN_NOTCH_LANG"].flatMap(Lang.init(rawValue:)) ?? .saved {
-        didSet { if DebugRender.directory == nil { UserDefaults.standard.set(lang.rawValue, forKey: Lang.defaultsKey) } }
+        didSet {
+            if DebugRender.directory == nil, DemoVideo.directory == nil {
+                UserDefaults.standard.set(lang.rawValue, forKey: Lang.defaultsKey)
+            }
+        }
     }
     var t: L10n { L10n(lang: lang) }
     /// 展开面板内容的实际高度（由视图回报），用于热区判定。
     @Published var panelHeight: CGFloat = 420
 
-    static let wingWidth: CGFloat = 132
+    static let wingWidth: CGFloat = 146
     static let panelWidth: CGFloat = 680
     static let rotateEvery: TimeInterval = 4
 
