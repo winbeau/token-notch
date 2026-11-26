@@ -1,7 +1,7 @@
 import Foundation
 import TokenCore
 
-// 用法：tokens [--db <path>] [--reset] [--json]
+// 用法：tokens [--db <path>] [--reset] [--bench]
 // 导入本机 agent 日志到 ~/.tokens/tokens.db，然后打印各时间范围的统计。
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -18,6 +18,14 @@ func option(_ name: String) -> String? {
 
 let dbPath = option("--db")
 let reset = flag("--reset")
+let bench = flag("--bench")
+
+/// 跑 n 次取平均，毫秒。
+func time(_ n: Int, _ body: () throws -> Void) rethrows -> Double {
+    let t = Date()
+    for _ in 0..<n { try body() }
+    return Date().timeIntervalSince(t) / Double(n) * 1000
+}
 
 do {
     let store = try dbPath.map { try Store(path: $0) } ?? Store.openDefault()
@@ -28,6 +36,23 @@ do {
     print(String(format: "导入：读 %d 个文件，%d 条事件、%d 次编辑、%d 次生图，用时 %.2fs；库内共 %d 条事件、%d 次编辑、%d 次生图（%@）",
                  r.filesRead, r.events, r.edits, r.images, Date().timeIntervalSince(t0), try store.eventCount(),
                  try store.editCount(), try store.imageCount(), store.path))
+
+    if bench {
+        // 界面常驻时反复做的几件事各要多久
+        let engine = StatsEngine(store: store)
+        var snap = try engine.snapshot()
+        let full = try time(5) { snap = try engine.snapshot() }
+        let live = try time(50) { snap = try engine.refreshingLive(snap) }
+        let today = snap.stats(.today).endDay
+        let refresh = try time(5) {
+            try store.db.run("INSERT OR IGNORE INTO daily_dirty (day) VALUES (?)", [.text(today)])
+            try store.refreshDaily()
+        }
+        let scan = try time(3) { _ = try ingestor.scanAll() }
+        print(String(format: "完整快照 %.1f ms｜只刷新实时 %.2f ms｜重算今天的汇总 %.1f ms｜空扫一遍全部日志 %.0f ms",
+                     full, live, refresh, scan))
+        exit(0)
+    }
 
     let t1 = Date()
     let snap = try StatsEngine(store: store).snapshot()

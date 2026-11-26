@@ -61,6 +61,16 @@ public final class TokenService: @unchecked Sendable {
     private var tickTimer: DispatchSourceTimer?
     private var activity: [Agent: Date] = [:]
     private var lastPublish = Date.distantPast
+    /// 上一次算好的完整快照。库里没有新数据时只刷新它的实时部分，不重算各时间范围。
+    private var cached: Snapshot?
+    /// 库里有新数据（或价格表变了），下次发布要重算各时间范围
+    private var dirty = true
+    /// 攒着还没导入的变动文件。agent 输出时同一个文件每秒会报好几次，攒一小会儿一起处理。
+    private var pendingPaths: Set<String> = []
+    private var flushScheduled = false
+    private var lastFlush = Date.distantPast
+    /// 两次导入之间至少隔这么久
+    static let minFlushInterval: TimeInterval = 0.5
 
     public init(store: Store, sources: [LogSource] = LogSource.defaults) {
         self.store = store
@@ -71,14 +81,15 @@ public final class TokenService: @unchecked Sendable {
     public func start() {
         queue.async { [self] in
             // 首次回填可能要十几秒（DeepSeek Harness 的压缩日志），每扫完一类 agent 先发一份快照
-            run { try ingestor.scanAll(afterSource: { [weak self] _ in self?.publish() }) }
+            run { try ingestor.scanAll(afterSource: { [weak self] _ in self?.dirty = true; self?.publish() }) }
             ready = true
+            dirty = true
             publish()
             startWatching()
             // 兜底：每分钟扫一遍（只读有变化的文件），也负责发现新建的日志目录。
             rescanTimer = timer(every: 60) { [weak self] in
                 guard let self else { return }
-                run { try self.ingestor.scanAll() }
+                run { if !(try self.ingestor.scanAll()).touchedAgents.isEmpty { self.dirty = true } }
                 publish()
                 if watcher == nil { startWatching() }
             }
@@ -106,6 +117,7 @@ public final class TokenService: @unchecked Sendable {
                 try store.reset()
                 try ingestor.scanAll()
             }
+            dirty = true
             publish()
         }
     }
@@ -113,6 +125,7 @@ public final class TokenService: @unchecked Sendable {
     public func reloadPricing() {
         queue.async { [self] in
             engine.pricing = .load()
+            dirty = true
             publish()
         }
     }
@@ -133,14 +146,36 @@ public final class TokenService: @unchecked Sendable {
         for p in paths {
             if let a = ingestor.agent(for: p) { activity[a] = now }
         }
-        run { try ingestor.ingest(paths: paths) }
+        pendingPaths.formUnion(paths)
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        // 空闲时来的第一批立刻处理；紧跟着来的攒到间隔结束再一起处理
+        let wait = max(0, Self.minFlushInterval - now.timeIntervalSince(lastFlush))
+        queue.asyncAfter(deadline: .now() + wait) { [weak self] in self?.flush() }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        lastFlush = Date()
+        let paths = Array(pendingPaths)
+        pendingPaths.removeAll(keepingCapacity: true)
+        run { if !(try ingestor.ingest(paths: paths)).touchedAgents.isEmpty { dirty = true } }
         publish()
     }
 
     private func publish() {
         do {
-            let snap = try engine.snapshot(activity: activity)
-            lastPublish = Date()
+            let now = Date()
+            let snap: Snapshot
+            // 各时间范围只在库里有新数据或跨天时重算；其余时候（两秒一次的刷新）只更新实时部分
+            if !dirty, let cached, Time.day(cached.generatedAt) == Time.day(now) {
+                snap = try engine.refreshingLive(cached, now: now, activity: activity)
+            } else {
+                snap = try engine.snapshot(now: now, activity: activity)
+                dirty = false
+            }
+            cached = snap
+            lastPublish = now
             onSnapshot?(snap)
         } catch {
             onError?(error)

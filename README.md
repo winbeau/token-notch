@@ -103,6 +103,7 @@ swift test                      # parser, ingest, edit-count and migration tests
 ### How the numbers are computed
 
 - **Total** = fresh input + cache read + cache write + output. **Cache hit** = cache read ÷ (fresh input + cache read + cache write). Days use your local time zone.
+- **Overhead.** The numbers are computed from a small per-day rollup table (day × agent × model × project); only days whose events changed are re-aggregated, range statistics are recomputed only when new data arrives, and bursts of changes to the same file are imported together every 0.5 s. On a database of 135K events a full recompute takes about 9 ms and the idle process stays under 0.2% CPU. `tokens --bench` measures it on your machine.
 - **tok/s** = a response's output tokens ÷ its generation time. Antigravity and Grok record the real duration; for the others it is estimated from log timestamps (Codex's estimate includes tool time). For Claude the time runs from the request to the last content block of the response. "Live" uses the last 90 seconds.
 - **Cost** uses per-model prices (default table derived from [cc-switch](https://github.com/farion1231/cc-switch)'s seed prices). Add or override models in `~/.tokens/pricing.json`:
 

@@ -162,15 +162,65 @@ public struct StatsEngine: Sendable {
         self.pricing = pricing
     }
 
+    /// 汇总表的一行：某天 × agent × 模型 × 项目。
+    struct DailyRow {
+        var day: String
+        var agent: Agent
+        var model: String
+        var cwd: String
+        var input, cacheRead, cacheWrite, output, sub, genOut, genMs: Int64
+    }
+
+    /// 四个时间范围要用的原始行，一次读出来，各范围在内存里各取各的。
+    struct Source {
+        var daily: [DailyRow] = []
+        /// (day, agent, cwd, 行数)
+        var edits: [(day: String, agent: Agent, cwd: String, lines: Int64)] = []
+        /// (day, agent, model, 调用次数, 张数)
+        var images: [(day: String, agent: Agent, model: String, calls: Int64, count: Int64)] = []
+    }
+
+    func loadSource() throws -> Source {
+        try store.refreshDaily()
+        var src = Source()
+        for r in try store.db.query("""
+            SELECT day, agent, model, cwd, input, cache_read, cache_write, output, sub_tokens, gen_out, gen_ms FROM daily
+            """) {
+            guard let a = Agent(rawValue: r[1].text) else { continue }
+            src.daily.append(DailyRow(day: r[0].text, agent: a, model: r[2].text, cwd: r[3].text, input: r[4].int,
+                                      cacheRead: r[5].int, cacheWrite: r[6].int, output: r[7].int, sub: r[8].int,
+                                      genOut: r[9].int, genMs: r[10].int))
+        }
+        for r in try store.db.query("SELECT day, agent, cwd, SUM(lines) FROM edits GROUP BY day, agent, cwd") {
+            guard let a = Agent(rawValue: r[1].text) else { continue }
+            src.edits.append((r[0].text, a, r[2].text, r[3].int))
+        }
+        for r in try store.db.query("SELECT day, agent, model, COUNT(*), SUM(count) FROM images GROUP BY day, agent, model") {
+            guard let a = Agent(rawValue: r[1].text) else { continue }
+            src.images.append((r[0].text, a, r[2].text, r[3].int, r[4].int))
+        }
+        return src
+    }
+
     public func snapshot(now: Date = Date(), activity: [Agent: Date] = [:]) throws -> Snapshot {
         let today = Time.day(now, calendar: calendar)
-        let first = try store.db.query("SELECT MIN(day) FROM events").first?.first.flatMap { $0.isNull ? nil : $0.text }
+        let src = try loadSource()
+        let first = src.daily.lazy.map(\.day).min()
         var ranges: [TimeRange: RangeStats] = [:]
         for r in TimeRange.allCases {
-            ranges[r] = try rangeStats(r, today: today, firstDay: first, now: now)
+            ranges[r] = rangeStats(r, today: today, firstDay: first, now: now, source: src)
         }
         return Snapshot(generatedAt: now, firstDay: first, ranges: ranges,
                         live: try live(now: now, today: today, activity: activity))
+    }
+
+    /// 只刷新实时部分（今日合计、最近活动、tok/s），各时间范围的统计沿用 `base` 里的。
+    /// 库里没有新数据时用这个：两翼的出现和消失、实时速度靠它每两秒更新一次，开销是几次小查询。
+    public func refreshingLive(_ base: Snapshot, now: Date = Date(), activity: [Agent: Date] = [:]) throws -> Snapshot {
+        var snap = base
+        snap.generatedAt = now
+        snap.live = try live(now: now, today: Time.day(now, calendar: calendar), activity: activity)
+        return snap
     }
 
     func startDay(_ r: TimeRange, now: Date, firstDay: String?) -> String {
@@ -179,96 +229,88 @@ public struct StatsEngine: Sendable {
         return Time.day(start, calendar: calendar)
     }
 
-    func rangeStats(_ r: TimeRange, today: String, firstDay: String?, now: Date) throws -> RangeStats {
+    func rangeStats(_ r: TimeRange, today: String, firstDay: String?, now: Date, source: Source) -> RangeStats {
         let start = startDay(r, now: now, firstDay: firstDay)
-        let bounds: [SQLValue] = [.text(start), .text(today)]
+        func inRange(_ day: String) -> Bool { day >= start && day <= today }
+
+        struct Sums { var input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0
+                      var sub: Int64 = 0, genOut: Int64 = 0, genMs: Int64 = 0 }
+        struct ModelKey: Hashable { var agent: Agent; var model: String }
+        struct ProjectKey: Hashable { var cwd: String; var agent: Agent; var model: String }
+        var byModel: [ModelKey: Sums] = [:]
+        var byProject: [ProjectKey: Sums] = [:]
+        var byDay: [String: [Agent: Int64]] = [:]
+        for row in source.daily where inRange(row.day) {
+            func add(_ s: inout Sums) {
+                s.input += row.input
+                s.cacheRead += row.cacheRead
+                s.cacheWrite += row.cacheWrite
+                s.output += row.output
+                s.sub += row.sub
+                s.genOut += row.genOut
+                s.genMs += row.genMs
+            }
+            add(&byModel[ModelKey(agent: row.agent, model: row.model), default: Sums()])
+            add(&byProject[ProjectKey(cwd: row.cwd, agent: row.agent, model: row.model), default: Sums()])
+            byDay[row.day, default: [:]][row.agent, default: 0] += row.input + row.cacheRead + row.cacheWrite + row.output
+        }
 
         // 按 agent × 模型
         var models: [ModelStat] = []
         var agentTotals: [Agent: TokenTotals] = [:]
         var agentSub: [Agent: Int64] = [:]
-        let modelRows = try store.db.query("""
-            SELECT agent, model, SUM(input), SUM(cache_read), SUM(cache_write), SUM(output),
-                   SUM(CASE WHEN sub = 1 THEN input + cache_read + cache_write + output ELSE 0 END),
-                   SUM(CASE WHEN gen_ms IS NOT NULL THEN output ELSE 0 END),
-                   SUM(COALESCE(gen_ms, 0))
-            FROM events WHERE day >= ? AND day <= ? GROUP BY agent, model
-            """, bounds)
-        for row in modelRows {
-            guard let agent = Agent(rawValue: row[0].text) else { continue }
-            let t = totals(model: row[1].text, input: row[2].int, cacheRead: row[3].int,
-                           cacheWrite: row[4].int, output: row[5].int)
-            let genMs = row[8].int
-            models.append(ModelStat(agent: agent, model: row[1].text, totals: t,
-                                    tokPerSec: genMs > 0 ? Double(row[7].int) / Double(genMs) * 1000 : nil))
-            agentTotals[agent, default: TokenTotals()] += t
-            agentSub[agent, default: 0] += row[6].int
+        for (key, sum) in byModel {
+            let t = totals(model: key.model, input: sum.input, cacheRead: sum.cacheRead,
+                           cacheWrite: sum.cacheWrite, output: sum.output)
+            models.append(ModelStat(agent: key.agent, model: key.model, totals: t,
+                                    tokPerSec: sum.genMs > 0 ? Double(sum.genOut) / Double(sum.genMs) * 1000 : nil))
+            agentTotals[key.agent, default: TokenTotals()] += t
+            agentSub[key.agent, default: 0] += sum.sub
         }
-        models.sort { $0.totals.total > $1.totals.total }
+        models.sort { ($0.totals.total, $1.id) > ($1.totals.total, $0.id) }
         // 编辑行数（只挂到有用量的 agent 上）
         var agentEdits: [Agent: Int64] = [:]
         var projectEdits: [String: Int64] = [:]
-        for row in try store.db.query("""
-            SELECT agent, cwd, SUM(lines) FROM edits WHERE day >= ? AND day <= ? GROUP BY agent, cwd
-            """, bounds) {
-            guard let a = Agent(rawValue: row[0].text) else { continue }
-            agentEdits[a, default: 0] += row[2].int
-            projectEdits[row[1].text, default: 0] += row[2].int
+        for e in source.edits where inRange(e.day) {
+            agentEdits[e.agent, default: 0] += e.lines
+            projectEdits[e.cwd, default: 0] += e.lines
         }
         // 生图调用
         var agentImages: [Agent: (calls: Int64, images: Int64)] = [:]
-        var imageModels: [ImageModelStat] = []
-        for row in try store.db.query("""
-            SELECT agent, model, COUNT(*), SUM(count) FROM images WHERE day >= ? AND day <= ? GROUP BY agent, model
-            """, bounds) {
-            guard let a = Agent(rawValue: row[0].text) else { continue }
-            agentImages[a, default: (0, 0)].calls += row[2].int
-            agentImages[a, default: (0, 0)].images += row[3].int
-            if let i = imageModels.firstIndex(where: { $0.model == row[1].text }) {
-                imageModels[i].calls += row[2].int
-                imageModels[i].images += row[3].int
-            } else {
-                imageModels.append(ImageModelStat(model: row[1].text, calls: row[2].int, images: row[3].int))
-            }
+        var imagesByModel: [String: (calls: Int64, images: Int64)] = [:]
+        for i in source.images where inRange(i.day) {
+            agentImages[i.agent, default: (0, 0)].calls += i.calls
+            agentImages[i.agent, default: (0, 0)].images += i.count
+            imagesByModel[i.model, default: (0, 0)].calls += i.calls
+            imagesByModel[i.model, default: (0, 0)].images += i.count
         }
-        imageModels.sort { $0.calls > $1.calls }
+        let imageModels = imagesByModel.map { ImageModelStat(model: $0.key, calls: $0.value.calls, images: $0.value.images) }
+            .sorted { ($0.calls, $1.model) > ($1.calls, $0.model) }
         let agents = agentTotals.map { AgentStat(agent: $0.key, totals: $0.value, subagentTokens: agentSub[$0.key] ?? 0,
                                                  editLines: agentEdits[$0.key] ?? 0,
                                                  imageCalls: agentImages[$0.key]?.calls ?? 0,
                                                  images: agentImages[$0.key]?.images ?? 0) }
-            .sorted { $0.totals.total > $1.totals.total }
+            .sorted { ($0.totals.total, $1.agent.rawValue) > ($1.totals.total, $0.agent.rawValue) }
         let all = agents.reduce(TokenTotals()) { $0 + $1.totals }
 
         // 每日 × agent，补齐空白天
-        var byDay: [String: [Agent: Int64]] = [:]
-        for row in try store.db.query("""
-            SELECT day, agent, SUM(input + cache_read + cache_write + output)
-            FROM events WHERE day >= ? AND day <= ? GROUP BY day, agent
-            """, bounds) {
-            guard let a = Agent(rawValue: row[1].text) else { continue }
-            byDay[row[0].text, default: [:]][a] = row[2].int
-        }
         let daily = days(from: start, to: today).map { DayStat(day: $0, perAgent: byDay[$0] ?? [:]) }
 
         // 项目 × agent（按模型计价后汇总）
         var proj: [String: (perAgent: [Agent: Int64], cost: Double)] = [:]
-        for row in try store.db.query("""
-            SELECT cwd, agent, model, SUM(input), SUM(cache_read), SUM(cache_write), SUM(output)
-            FROM events WHERE day >= ? AND day <= ? GROUP BY cwd, agent, model
-            """, bounds) {
-            guard let a = Agent(rawValue: row[1].text) else { continue }
-            let t = totals(model: row[2].text, input: row[3].int, cacheRead: row[4].int,
-                           cacheWrite: row[5].int, output: row[6].int)
-            var p = proj[row[0].text] ?? ([:], 0)
-            p.perAgent[a, default: 0] += t.total
+        for (key, sum) in byProject {
+            let t = totals(model: key.model, input: sum.input, cacheRead: sum.cacheRead,
+                           cacheWrite: sum.cacheWrite, output: sum.output)
+            var p = proj[key.cwd] ?? ([:], 0)
+            p.perAgent[key.agent, default: 0] += t.total
             p.cost += t.cost
-            proj[row[0].text] = p
+            proj[key.cwd] = p
         }
         let names = Self.displayNames(for: Array(proj.keys))
         let projects = proj.map { ProjectStat(cwd: $0.key, name: names[$0.key] ?? $0.key,
                                               perAgent: $0.value.perAgent, cost: $0.value.cost,
                                               editLines: projectEdits[$0.key] ?? 0) }
-            .sorted { $0.total > $1.total }
+            .sorted { ($0.total, $1.cwd) > ($1.total, $0.cwd) }
 
         return RangeStats(range: r, startDay: start, endDay: today, totals: all,
                           agents: agents, models: models, daily: daily, projects: projects, imageModels: imageModels)
@@ -277,12 +319,13 @@ public struct StatsEngine: Sendable {
     func live(now: Date, today: String, activity: [Agent: Date]) throws -> [Agent: LiveStat] {
         var out: [Agent: LiveStat] = [:]
         for a in Agent.allCases { out[a] = LiveStat(agent: a, today: 0, lastActivity: activity[a], tokPerSec: nil) }
+        try store.refreshDaily()
         for row in try store.db.query("""
-            SELECT agent, SUM(input + cache_read + cache_write + output) FROM events WHERE day = ? GROUP BY agent
+            SELECT agent, SUM(input + cache_read + cache_write + output) FROM daily WHERE day = ? GROUP BY agent
             """, [.text(today)]) {
             if let a = Agent(rawValue: row[0].text) { out[a]?.today = row[1].int }
         }
-        for row in try store.db.query("SELECT agent, MAX(ts) FROM events GROUP BY agent") {
+        for row in try store.db.query("SELECT agent, MAX(last_ts) FROM daily GROUP BY agent") {
             guard let a = Agent(rawValue: row[0].text) else { continue }
             let d = Date(timeIntervalSince1970: Double(row[1].int) / 1000)
             if out[a]?.lastActivity.map({ $0 < d }) ?? true { out[a]?.lastActivity = d }

@@ -21,7 +21,7 @@ public final class Store: @unchecked Sendable {
         try migrate()
     }
 
-    static let schemaVersion = 4
+    static let schemaVersion = 5
 
     /// 同一模型的不同叫法，入库时统一。DeepSeek Harness 记的 deepseek-flash 就是 V4.1 Flash。
     static let modelAliases: [String: String] = [
@@ -110,6 +110,34 @@ public final class Store: @unchecked Sendable {
                 // 让历史日志按新算法重算一遍。events、images 是按键幂等 upsert，重读不会重复计数。
                 if v >= 1 { try db.exec("DELETE FROM edits; DELETE FROM cursors;") }
             }
+            if v < 5 {
+                // 按天汇总：界面上的数字都从这张小表算，不再每次扫全部事件。
+                // 一行是「某天 × agent × 模型 × 项目」的合计；events 有改动的那几天记进 daily_dirty，
+                // 读统计前把这几天重算一遍（见 refreshDaily）。汇总是从 events 推出来的，随时可以整表重建。
+                try db.exec("""
+                CREATE TABLE IF NOT EXISTS daily (
+                    day         TEXT NOT NULL,
+                    agent       TEXT NOT NULL,
+                    model       TEXT NOT NULL,
+                    cwd         TEXT NOT NULL,
+                    input       INTEGER NOT NULL,
+                    cache_read  INTEGER NOT NULL,
+                    cache_write INTEGER NOT NULL,
+                    output      INTEGER NOT NULL,
+                    sub_tokens  INTEGER NOT NULL,
+                    gen_out     INTEGER NOT NULL,
+                    gen_ms      INTEGER NOT NULL,
+                    last_ts     INTEGER NOT NULL,
+                    PRIMARY KEY (day, agent, model, cwd)
+                ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS daily_dirty (day TEXT PRIMARY KEY) WITHOUT ROWID;
+                DELETE FROM daily;
+                INSERT OR IGNORE INTO daily_dirty SELECT DISTINCT day FROM events;
+                -- 编辑行数按「天 × agent × 项目」汇总时只扫这个索引，不回表、不排序（它也顶替了原来只有 day 的索引）
+                DROP INDEX IF EXISTS idx_edits_day;
+                CREATE INDEX IF NOT EXISTS idx_edits_roll ON edits(day, agent, cwd, lines);
+                """)
+            }
             try db.exec("PRAGMA user_version = \(Self.schemaVersion);")
         }
     }
@@ -129,11 +157,17 @@ public final class Store: @unchecked Sendable {
             output      = max(output, excluded.output),
             gen_ms      = CASE WHEN excluded.gen_ms IS NULL THEN gen_ms WHEN gen_ms IS NULL THEN excluded.gen_ms
                                ELSE max(gen_ms, excluded.gen_ms) END
+        RETURNING day
         """)
 
     /// 同一键重复出现时（流式多行、文件被重读）取各字段最大值，所以重放是安全的。
+    /// 改到的那几天记进 daily_dirty（和事件在同一个事务里），汇总表下次读之前重算。
     func upsert(_ events: [UsageEvent]) throws {
+        guard !events.isEmpty else { return }
         guard let st = upsertStmt else { throw SQLiteError(message: "upsert 语句准备失败") }
+        // 行里存的 day 是第一次写入时定的，后来的更新不改它，所以以语句返回的为准
+        var days: Set<String> = []
+        defer { for d in days { try? db.run("INSERT OR IGNORE INTO daily_dirty (day) VALUES (?)", [.text(d)]) } }
         for e in events {
             try st.bind([
                 .text(e.key), .text(e.agent.rawValue), .int(e.ts), .text(Time.day(ms: e.ts)),
@@ -141,7 +175,10 @@ public final class Store: @unchecked Sendable {
                 .int(e.input), .int(e.cacheRead), .int(e.cacheWrite), .int(e.output),
                 e.genMs.map { .int($0) } ?? .null,
             ])
-            _ = try st.step()
+            if try st.step() {
+                days.insert(st.row()[0].text)
+                while try st.step() {}
+            }
         }
     }
 
@@ -235,8 +272,44 @@ public final class Store: @unchecked Sendable {
                   .int(Int64(bitPattern: c.fingerprint)), .double(c.mtime), c.state.map { .blob($0) } ?? .null])
     }
 
+    // MARK: 按天汇总
+
+    private lazy var dirtyStmt: Statement? = try? db.prepare("SELECT day FROM daily_dirty")
+
+    /// 把有改动的那几天的汇总重算一遍。没有改动时只是一次空查询。读统计之前调用。
+    public func refreshDaily() throws {
+        guard let st = dirtyStmt else { throw SQLiteError(message: "daily_dirty 语句准备失败") }
+        try st.bind([])
+        var days: [String] = []
+        while try st.step() { days.append(st.row()[0].text) }
+        guard !days.isEmpty else { return }
+        try db.transaction {
+            for day in days {
+                try db.run("DELETE FROM daily WHERE day = ?", [.text(day)])
+                try db.run("""
+                    INSERT INTO daily
+                    SELECT day, agent, model, cwd, SUM(input), SUM(cache_read), SUM(cache_write), SUM(output),
+                           SUM(CASE WHEN sub = 1 THEN input + cache_read + cache_write + output ELSE 0 END),
+                           SUM(CASE WHEN gen_ms IS NOT NULL THEN output ELSE 0 END),
+                           SUM(COALESCE(gen_ms, 0)), MAX(ts)
+                    FROM events WHERE day = ? GROUP BY agent, model, cwd
+                    """, [.text(day)])
+            }
+            try db.exec("DELETE FROM daily_dirty")
+        }
+    }
+
+    /// 游标的位置和修改时间，不带解析器状态（状态可能有几 MB，全量扫描时用不着）。
+    func cursorIndex() throws -> [String: (offset: Int64, mtime: Double)] {
+        var out: [String: (offset: Int64, mtime: Double)] = [:]
+        for r in try db.query("SELECT path, offset, mtime FROM cursors") {
+            out[r[0].text] = (r[1].int, r[2].double)
+        }
+        return out
+    }
+
     /// 清空全部数据，下次扫描会从头回填。
     public func reset() throws {
-        try db.exec("DELETE FROM events; DELETE FROM edits; DELETE FROM images; DELETE FROM cursors;")
+        try db.exec("DELETE FROM events; DELETE FROM edits; DELETE FROM images; DELETE FROM cursors; DELETE FROM daily; DELETE FROM daily_dirty;")
     }
 }
