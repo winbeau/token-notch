@@ -5,12 +5,16 @@ public enum FileMatch: Sendable {
     case jsonl                  // 任意 *.jsonl
     case named(String)          // 固定文件名（目录里还有别的 jsonl）
     case dshSession             // session.v<N>.jsonl[.zstd]
+    /// 每个会话一个目录，日志在目录里的固定位置：`<根>/<会话>/<相对路径>`。
+    /// 找文件时只列根目录的下一层，不往会话目录里钻（Antigravity 的会话目录里有几万个草稿文件）。
+    case perSession(String)
 
     public func accepts(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         switch self {
         case .jsonl: return name.hasSuffix(".jsonl")
         case .named(let n): return name == n
+        case .perSession(let relative): return path.hasSuffix("/" + relative)
         case .dshSession:
             return name.hasPrefix("session.v") && (name.hasSuffix(".jsonl") || name.hasSuffix(".jsonl.zstd"))
         }
@@ -40,7 +44,7 @@ public struct LogSource: Sendable {
             // IDE 写 antigravity/，CLI 写 antigravity-cli/，布局相同
             LogSource(agent: .antigravity, roots: [home.appendingPathComponent(".gemini/antigravity/brain"),
                                                    home.appendingPathComponent(".gemini/antigravity-cli/brain")],
-                      match: .named("transcript_full.jsonl")),
+                      match: .perSession(".system_generated/logs/transcript_full.jsonl")),
             LogSource(agent: .grok, roots: [home.appendingPathComponent(".grok/sessions"),
                                             home.appendingPathComponent(".grok/archived_sessions")],
                       match: .named("updates.jsonl")),
@@ -93,7 +97,7 @@ public final class Ingestor: @unchecked Sendable {
     /// `afterSource`：每扫完一类 agent 回调一次（首次回填时让界面先显示已导入的部分）。
     @discardableResult
     public func scanAll(afterSource: ((Agent) -> Void)? = nil) throws -> IngestResult {
-        let cursors = try store.allCursors()
+        let cursors = try store.cursorIndex()
         var result = IngestResult()
         for source in sources {
             for path in Self.files(under: source.roots, match: source.match) {
@@ -133,6 +137,13 @@ public final class Ingestor: @unchecked Sendable {
     static func files(under roots: [URL], match: FileMatch) -> [String] {
         var out: [String] = []
         for root in roots {
+            if case .perSession(let relative) = match {
+                for session in (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [] {
+                    let path = root.path + "/" + session + "/" + relative
+                    if FileManager.default.fileExists(atPath: path) { out.append(path) }
+                }
+                continue
+            }
             guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
             for case let url as URL in e where match.accepts(url.path) {
                 out.append(url.path)
@@ -160,15 +171,18 @@ public final class Ingestor: @unchecked Sendable {
 
         var offset: Int64 = 0
         var p = P()
-        if let c = try store.cursor(for: path), c.offset <= size,
+        let saved = try store.cursor(for: path)
+        if let c = saved, c.offset <= size,
            c.offset == 0 || Self.fingerprint(fh, end: c.offset) == c.fingerprint {
             offset = c.offset
+            // 没有新内容、游标也没变：什么都不用做（文件监听对同一次写入常常连报几次）
+            if offset == size, c.mtime == mtime { return (0, 0, 0) }
             if let s = c.state, let decoded = try? JSONDecoder().decode(P.self, from: s) { p = decoded }
         }
         if offset == size {
             try store.save(.init(path: path, agent: agent, offset: offset,
                                  fingerprint: Self.fingerprint(fh, end: offset), mtime: mtime,
-                                 state: try? JSONEncoder().encode(p)))
+                                 state: try? Self.stateEncoder.encode(p)))
             return (0, 0, 0)
         }
 
@@ -206,7 +220,7 @@ public final class Ingestor: @unchecked Sendable {
         let newOffset = offset + Int64(compressedConsumed ?? consumed)
         let cursor = Store.Cursor(path: path, agent: agent, offset: newOffset,
                                   fingerprint: Self.fingerprint(fh, end: newOffset), mtime: mtime,
-                                  state: try? JSONEncoder().encode(p))
+                                  state: try? Self.stateEncoder.encode(p))
         try store.db.transaction {
             try store.upsert(out.events)
             try store.upsert(edits: out.edits)
@@ -215,6 +229,14 @@ public final class Ingestor: @unchecked Sendable {
         }
         return (out.events.count, out.edits.count, out.images.count)
     }
+
+    /// 解析器状态按固定的键序编码：状态没变时编出来的字节也一模一样，SQLite 覆盖写同样内容的页不会进 WAL。
+    /// （字典默认的键序每次运行都不同，Antigravity 那份一百多 KB 的状态会每次整份重写。）
+    static let stateEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
+        return e
+    }()
 
     /// 游标前最多 64 字节的 FNV-1a 指纹。
     static func fingerprint(_ fh: FileHandle, end: Int64) -> UInt64 {

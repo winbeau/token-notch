@@ -75,7 +75,7 @@ final class AgentParserTests: XCTestCase {
         }
         let store = try Store(path: dir.appendingPathComponent("t.db").path)
         let ing = Ingestor(store: store, sources: [LogSource(agent: .antigravity, roots: [dir.appendingPathComponent("brain")],
-                                                             match: .named("transcript_full.jsonl"))])
+                                                             match: .perSession(".system_generated/logs/transcript_full.jsonl"))])
         XCTAssertEqual(try ing.scanAll().events, 1)
         let r = try store.db.query("SELECT model, cwd, sub, gen_ms FROM events").first!
         XCTAssertEqual(r[0].text, "gemini-4-carbon")      // Orchestrator 别名换成实际模型
