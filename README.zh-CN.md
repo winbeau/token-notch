@@ -120,6 +120,7 @@ scripts/build-app.sh    打包 .app（ad-hoc 签名）
 - [x] 更多 agent：Antigravity（Gemini）、Grok、DeepSeek Harness
 - [x] 生图调用次数（img / imagegen）
 - [x] 演示站；编辑行数按 diff 计、排除临时文件
+- [x] 常驻开销：按天汇总表、有新数据才重算、合并文件事件
 - [ ] 生图费用（按模型和尺寸计价）
 - [ ] Grok 的编辑行数（等有编辑工具的日志样本）
 - [ ] 全屏应用时自动隐藏；开机自启（`SMAppService`）
