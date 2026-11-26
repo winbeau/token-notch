@@ -141,18 +141,85 @@ struct WingsView: View {
     }
 }
 
+/// 两翼上的呼吸圆点。
+///
+/// 动画交给 Core Animation：光晕的缩放由系统的渲染进程驱动，应用自己不用每帧干活。
+/// （SwiftUI 的 `repeatForever` 动画会让整个视图每帧在主线程重新布局，两翼亮着的时候常驻占用一成多 CPU。）
 struct PulseDot: View {
     var color: Color
-    @State private var on = false
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
-            .background(Circle().fill(color.opacity(0.25)).frame(width: 13, height: 13).scaleEffect(on ? 1 : 0.6))
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { on = true }
-            }
+        if DebugRender.directory != nil || DemoVideo.directory != nil {
+            // 离屏渲染画不出 AppKit 视图，截图和演示视频里用静止的
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .background(Circle().fill(color.opacity(0.25)).frame(width: 13, height: 13))
+        } else {
+            PulseLayer(color: NSColor(color))
+                .frame(width: 13, height: 13)
+                .frame(width: 7, height: 7)   // 光晕不占布局位置
+        }
+    }
+}
+
+private struct PulseLayer: NSViewRepresentable {
+    var color: NSColor
+
+    func makeNSView(context: Context) -> PulseLayerView { PulseLayerView() }
+
+    func updateNSView(_ view: PulseLayerView, context: Context) { view.color = color }
+}
+
+final class PulseLayerView: NSView {
+    private let halo = CALayer()
+    private let dot = CALayer()
+
+    var color: NSColor = .white {
+        didSet {
+            dot.backgroundColor = color.cgColor
+            halo.backgroundColor = color.withAlphaComponent(0.25).cgColor
+        }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        layer?.addSublayer(halo)
+        layer?.addSublayer(dot)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        halo.bounds = CGRect(x: 0, y: 0, width: 13, height: 13)
+        halo.cornerRadius = 6.5
+        halo.position = center
+        dot.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
+        dot.cornerRadius = 3.5
+        dot.position = center
+        CATransaction.commit()
+    }
+
+    /// 视图离开窗口时动画会被系统摘掉，回到窗口里再挂上
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        halo.removeAnimation(forKey: "pulse")
+        guard window != nil else { return }
+        let pulse = CABasicAnimation(keyPath: "transform.scale")
+        pulse.fromValue = 0.6
+        pulse.toValue = 1.0
+        pulse.duration = 1.1
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        halo.add(pulse, forKey: "pulse")
     }
 }
 
