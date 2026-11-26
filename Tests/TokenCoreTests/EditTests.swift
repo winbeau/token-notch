@@ -258,7 +258,7 @@ final class EditRulesTests: XCTestCase {
             """)
         }
         let store = try Store(path: path)
-        XCTAssertEqual(store.db.userVersion, 4)
+        XCTAssertEqual(store.db.userVersion, Store.schemaVersion)
         XCTAssertEqual(try store.editCount(), 0)
         XCTAssertEqual(try store.allCursors().count, 0)
         XCTAssertEqual(try store.db.query("SELECT COUNT(*) FROM events").first?.first?.int, 1)   // 用量记录保留
