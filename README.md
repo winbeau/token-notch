@@ -26,20 +26,15 @@
 
 </div>
 
-## Features
+## Install
 
-- **Lives in the notch.** Idle, it blends into the notch. When an agent is working, two wings slide out: the agent on the left, live **tok/s** and today's total on the right. Several agents at once cross-fade every 4 s.
-- **Hover to expand.** Three pages × four ranges (Today / 7D / 30D / All):
-  - **Overview** — total tokens, cache hit rate, output, lines edited, live tok/s, share per agent, daily stacked bars, per-model table with cost.
-  - **Per agent** — today, range total, daily average, cache hit, output, **lines edited**, subagent share, **image-generation calls**, daily bars, model mix.
-  - **Details** — cache composition, hit rate per agent, image calls per model, **cost per project** (bar length compares projects, segments split by agent).
-- **Your whole history.** The first launch back-fills every log already on disk; after that FSEvents keeps it live, reading only appended lines.
-- **Lines edited.** Every change counts `max(added, removed)` lines — `+1 −1` is 1, `+7 −5` and `+5 −7` are both 7. Overwriting a file counts only the lines that changed; scratch files and lock files are left out.
-- **Image-generation calls**, counted per model and image count.
-- **Cost estimates** from a built-in price table, overridable in `~/.tokens/pricing.json`.
-- **Launch at login.** A checkmark in the right-click menu (macOS `SMAppService`), so the notch is already tracking when the first agent starts. `scripts/install.sh` turns it on for you.
-- **English / 中文**, switchable from the right-click menu.
-- **Local only.** Reads agent logs on your Mac, writes its own SQLite database to `~/.tokens/tokens.db`. No network, no telemetry.
+Download **TokenNotch-<version>.dmg** from the [latest release](https://github.com/winbeau/token-notch/releases/latest), open it, drag **TokenNotch** into **Applications**, then run this once — the app is ad-hoc signed, and macOS blocks the first launch otherwise:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
+```
+
+Right-click → **Open** on the first launch does the same thing. Launch at login is opt-in: right-click the notch → **开机自启 / Launch at login**; macOS lists it under **System Settings › General › Login Items & Extensions**. Every release also attaches the same app as a `.zip` and `tokens`, a command-line companion. macOS 14+, universal.
 
 <table>
 <tr>
@@ -70,20 +65,6 @@ How an edit is counted:
 - **Overwriting an existing file** is diffed against the previous version, so only changed lines count. Claude Code and DeepSeek Harness log the original file or the diff with the tool result. Antigravity does not, so the parser remembers the last content it saw for each file in the session (written, fully read, or edited) and diffs against that; a file it has never seen counts as new.
 - **Not counted:** files under `/tmp`, `/private/tmp`, `/var/folders` and the agents' own directories (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.dsh`, `~/.grok` — plans, memory, scratch); lock files, `*.min.js`, `*.min.css`, `*.map`, and anything under `node_modules`, `.build`, `__pycache__`, `.venv`, `Pods`, `DerivedData`.
 - Documentation (`.md` and the like) counts like code. Image calls are `img` / `imagegen` `generate|edit` commands run through an agent's shell tool (plus a built-in `image_gen` tool if one shows up).
-
-## Install
-
-The app is ad-hoc signed, not notarized, so macOS refuses the first launch. Clear the quarantine flag once — it is the step people forget:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
-```
-
-1. Download **TokenNotch-<version>.dmg** from the [latest release](https://github.com/winbeau/token-notch/releases/latest), open it, and drag **TokenNotch** into **Applications**.
-2. Run the line above once, or right-click → **Open** the first time instead.
-3. Launch at login is opt-in: right-click the notch → **开机自启 / Launch at login**. macOS lists it under **System Settings › General › Login Items & Extensions**, where you can turn it off again.
-
-Every release also attaches the same app as a `.zip`, plus `tokens`, a command-line tool that imports the logs and prints the same statistics (handy for checking numbers).
 
 ### Build from source
 

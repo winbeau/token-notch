@@ -28,31 +28,13 @@
 
 ## 安装
 
-应用只做了 ad-hoc 签名、没有公证，首次打开会被 macOS 拦下。装好后先在终端跑这一行（最容易忘的一步）：
+从 [最新 release](https://github.com/winbeau/token-notch/releases/latest) 下载 **TokenNotch-<版本>.dmg**，打开后把 **TokenNotch** 拖进「应用程序」，然后跑一次这行——应用只做了 ad-hoc 签名、没有公证，不跑 macOS 会拦下首次打开：
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
 ```
 
-1. 从 [最新 release](https://github.com/winbeau/token-notch/releases/latest) 下载 **TokenNotch-<版本>.dmg**，打开后把 **TokenNotch** 拖进「应用程序」。
-2. 跑上面那行；或者第一次打开时右键 →「打开」。
-3. 开机自启是手动开的：右键刘海 →「开机自启」。开关状态在「系统设置 › 通用 › 登录项与扩展」里也能看到、能关掉。
-
-每个 release 也附了同样的 `.zip`，以及命令行工具 `tokens`（导入日志并打印同样的统计，方便对账）。DeepSeek Harness 的日志是 zstd 压缩的，需要本机有 `zstd`（`brew install zstd`）。
-
-## 功能
-
-- **收起**：空闲时和刘海融为一体。
-- **活动**：有 agent 在跑时两翼浮出——左边是 agent，右边是实时 tok/s 和今日总量；多个 agent 同时在跑时每 4 秒交叉淡入轮播。
-- **展开**：鼠标移到刘海上展开面板，移开收回（展开弹簧略慢，收回更快；内容在形状张开后淡入）。顶部是标签（概览 / 各 agent / 明细）和时间范围（今日 / 7 天 / 30 天 / 全部）。
-  - 概览：所有 agent 合计、编辑行数、按 agent 占比、每日柱图（按 agent 叠加）、按模型分解与合计
-  - 单个 agent：今日、范围合计、日均、实时速度、缓存命中 / 输出 / 编辑行数 / 子代理占比（用过生图的 agent 多一格生图调用）、每日柱图、模型构成
-  - 明细：缓存命中构成、各 agent 命中率、生图调用（按模型）、项目耗费（bar 长度按项目对比，条内按 agent 分色）
-- **开机自启**：右键菜单里的勾选项（macOS `SMAppService`），登录后自动开始统计；`./scripts/install.sh` 装完会顺手打开。
-- 右键面板：重新统计、打开 `~/.tokens`、开机自启、切换中文 / English、退出。
-- 中英文：默认中文，右键菜单切换，存在 UserDefaults 的 `language`。时间范围、日期（11-22 / Nov 22）、星期名都跟着切换；K/M/B 与千分位两种语言一致。
-- 配色：各 agent 取自 logo——Claude 珊瑚橙、Codex 近白、Antigravity（Gemini）紫、Grok 中灰、DeepSeek 鲸鱼蓝；界面强调色仍是 #FF9F0A。
-
+第一次打开时右键 →「打开」也一样。开机自启是手动开的：右键刘海 →「开机自启」（系统设置 › 通用 › 登录项与扩展 里也能关）；右键面板还能重新统计、打开 `~/.tokens`、切换中英文、退出。每个 release 也附了同样的 `.zip` 和命令行工具 `tokens`；需要 macOS 14+、通用二进制，DeepSeek Harness 的日志要本机有 `zstd`（`brew install zstd`）。
 
 ## 数据
 
