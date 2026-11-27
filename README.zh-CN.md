@@ -28,15 +28,17 @@
 
 ## 安装
 
-1. 从 [最新 release](https://github.com/winbeau/token-notch/releases/latest) 下载 `TokenNotch-<版本>.zip` 并解压。
-2. 把 **TokenNotch.app** 移到「应用程序」。
-3. 应用只做了 ad-hoc 签名、没有公证，首次打开会被 macOS 拦下：右键 →「打开」，或者清掉隔离标记：
+应用只做了 ad-hoc 签名、没有公证，首次打开会被 macOS 拦下。装好后先在终端跑这一行（最容易忘的一步）：
 
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
-   ```
+```bash
+xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
+```
 
-release 里还有命令行工具 `tokens`，导入日志并打印同样的统计，方便对账。DeepSeek Harness 的日志是 zstd 压缩的，需要本机有 `zstd`（`brew install zstd`）。
+1. 从 [最新 release](https://github.com/winbeau/token-notch/releases/latest) 下载 **TokenNotch-<版本>.dmg**，打开后把 **TokenNotch** 拖进「应用程序」。
+2. 跑上面那行；或者第一次打开时右键 →「打开」。
+3. 开机自启是手动开的：右键刘海 →「开机自启」。开关状态在「系统设置 › 通用 › 登录项与扩展」里也能看到、能关掉。
+
+每个 release 也附了同样的 `.zip`，以及命令行工具 `tokens`（导入日志并打印同样的统计，方便对账）。DeepSeek Harness 的日志是 zstd 压缩的，需要本机有 `zstd`（`brew install zstd`）。
 
 ## 功能
 
@@ -46,7 +48,8 @@ release 里还有命令行工具 `tokens`，导入日志并打印同样的统计
   - 概览：所有 agent 合计、编辑行数、按 agent 占比、每日柱图（按 agent 叠加）、按模型分解与合计
   - 单个 agent：今日、范围合计、日均、实时速度、缓存命中 / 输出 / 编辑行数 / 子代理占比（用过生图的 agent 多一格生图调用）、每日柱图、模型构成
   - 明细：缓存命中构成、各 agent 命中率、生图调用（按模型）、项目耗费（bar 长度按项目对比，条内按 agent 分色）
-- 右键面板：重新统计、打开 `~/.tokens`、切换中文 / English、退出。
+- **开机自启**：右键菜单里的勾选项（macOS `SMAppService`），登录后自动开始统计；`./scripts/install.sh` 装完会顺手打开。
+- 右键面板：重新统计、打开 `~/.tokens`、开机自启、切换中文 / English、退出。
 - 中英文：默认中文，右键菜单切换，存在 UserDefaults 的 `language`。时间范围、日期（11-22 / Nov 22）、星期名都跟着切换；K/M/B 与千分位两种语言一致。
 - 配色：各 agent 取自 logo——Claude 珊瑚橙、Codex 近白、Antigravity（Gemini）紫、Grok 中灰、DeepSeek 鲸鱼蓝；界面强调色仍是 #FF9F0A。
 
@@ -86,10 +89,14 @@ release 里还有命令行工具 `tokens`，导入日志并打印同样的统计
 ## 构建与运行
 
 ```bash
-./scripts/build-app.sh          # 生成 dist/TokenNotch.app 和 dist/tokens
-open dist/TokenNotch.app
+./scripts/install.sh            # 编译、装进「应用程序」、打开应用、开启开机自启
+./scripts/install.sh --no-login # 只装，不动登录项；--uninstall 连登录项一起清掉
+./scripts/build-app.sh          # 只生成 dist/TokenNotch.app 和 dist/tokens
+VERSION=0.3.2 ./scripts/release.sh  # 打 .dmg / .zip / SHA256SUMS，发版用
 dist/tokens                     # 命令行：导入并打印各时间范围的统计（对账用）
 swift test                      # TokenCore 单元测试
+
+登录项记的是 .app 的路径，所以先把应用放到位再开自启。查状态：`/Applications/TokenNotch.app/Contents/MacOS/TokenNotch --login-item status`（`on` / `off` 可以脚本化开关）。
 ```
 
 调试开关：
@@ -110,6 +117,8 @@ Sources/TokenNotch/     刘海界面：窗口与热区、刘海形状、两翼�
 Sources/TokensCLI/      tokens 命令行
 Tests/TokenCoreTests/   解析、增量导入、编辑行数、生图、迁移、计价、格式化的测试
 scripts/build-app.sh    打包 .app（ad-hoc 签名）
+scripts/install.sh      装进「应用程序」并开启开机自启
+scripts/release.sh      打 DMG / zip / 校验和（发版用）
 ```
 
 ## 路线图
@@ -123,7 +132,8 @@ scripts/build-app.sh    打包 .app（ad-hoc 签名）
 - [x] 常驻开销：按天汇总表、有新数据才重算、合并文件事件
 - [ ] 生图费用（按模型和尺寸计价）
 - [ ] Grok 的编辑行数（等有编辑工具的日志样本）
-- [ ] 全屏应用时自动隐藏；开机自启（`SMAppService`）
+- [x] 开机自启（`SMAppService`）
+- [ ] 全屏应用时自动隐藏
 
 ## 致谢与许可
 

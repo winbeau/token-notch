@@ -15,7 +15,11 @@ let package = Package(
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         // 刘海界面
-        .executableTarget(name: "TokenNotch", dependencies: ["TokenCore"]),
+        .executableTarget(
+            name: "TokenNotch",
+            dependencies: ["TokenCore"],
+            linkerSettings: [.linkedFramework("ServiceManagement")]
+        ),
         // 命令行：导入 + 打印统计，用于对账和调试
         .executableTarget(name: "TokensCLI", dependencies: ["TokenCore"]),
         .testTarget(name: "TokenCoreTests", dependencies: ["TokenCore"]),

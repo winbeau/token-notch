@@ -151,7 +151,32 @@ struct L10n {
     var menuRebuild: String { s("重新统计（清空 ~/.tokens 后回填）", "Rebuild stats (clear ~/.tokens and re-import)") }
     var menuOpenFolder: String { s("在 Finder 中打开 ~/.tokens", "Open ~/.tokens in Finder") }
     var menuSwitchLanguage: String { s("Switch to English", "切换到中文") }
+    var menuLaunchAtLogin: String { s("开机自启", "Launch at login") }
     var menuQuit: String { s("退出 Token Notch", "Quit Token Notch") }
+
+    // MARK: 开机自启
+
+    var launchAtLoginOn: String { s("已开启", "on") }
+    var launchAtLoginOff: String { s("未开启", "off") }
+    var launchAtLoginNeedsApproval: String { s("需在系统设置 › 登录项里允许", "allow it in System Settings › Login Items") }
+    var launchAtLoginUnavailable: String { s("只有 .app 能开机自启", "only the .app can launch at login") }
+
+    var loginItemUnavailableTitle: String { s("开机自启需要从应用启动", "Launch at login needs the app") }
+    var loginItemUnavailableMessage: String {
+        s("当前是从命令行运行的裸二进制，系统登录项只认 TokenNotch.app。\n运行 scripts/install.sh 装到「应用程序」后再打开这个开关。",
+          "This copy was started from a command-line binary; the system only registers TokenNotch.app for login items.\nRun scripts/install.sh to install it in Applications, then turn this on there.")
+    }
+    var loginItemNeedsApprovalTitle: String { s("还差一步", "One more step") }
+    var loginItemNeedsApprovalMessage: String {
+        s("系统里已经加好了，但之前被关掉过，需要到「系统设置 › 通用 › 登录项与扩展」里允许 Token Notch。已经帮你打开了那个页面。",
+          "The login item is registered but was turned off before. Allow Token Notch in System Settings › General › Login Items & Extensions (the page is now open).")
+    }
+    var loginItemFailedTitle: String { s("开机自启没有改成", "Couldn't change launch at login") }
+    var loginItemRefused: String {
+        s("系统拒绝了注册（错误 1）。把 TokenNotch.app 放进「应用程序」再打开这个开关；刚重新编译过的话，先关掉再打开一次。",
+          "The system refused the registration (error 1). Keep TokenNotch.app in Applications and try again; after a rebuild, turn it off and on once.")
+    }
+    var alertOK: String { s("好", "OK") }
 }
 
 private struct L10nKey: EnvironmentKey {

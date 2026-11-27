@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import TokenCore
 
 @MainActor
@@ -55,6 +56,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func rebuild() { service?.rebuild() }
+
+    /// 右键菜单里的「开机自启」：改失败或需要用户确认时弹一个说明。
+    func setLaunchAtLogin(_ on: Bool) {
+        let t = model?.t ?? L10n(lang: .saved)
+        switch LaunchAtLogin.state {
+        case .unavailable:
+            alert(t.loginItemUnavailableTitle, t.loginItemUnavailableMessage)
+            return
+        case .requiresApproval where on:
+            SMAppService.openSystemSettingsLoginItems()
+            alert(t.loginItemNeedsApprovalTitle, t.loginItemNeedsApprovalMessage)
+            return
+        default:
+            break
+        }
+        if let error = LaunchAtLogin.set(on, t) {
+            alert(t.loginItemFailedTitle, error)
+            return
+        }
+        if on, LaunchAtLogin.state == .requiresApproval {
+            alert(t.loginItemNeedsApprovalTitle, t.loginItemNeedsApprovalMessage)
+        }
+    }
+
+    private func alert(_ title: String, _ message: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: (model?.t ?? L10n(lang: .saved)).alertOK)
+        alert.runModal()
+    }
 }
 
 import SwiftUI
@@ -65,6 +98,9 @@ func withAnimationIfVisible(_ body: () -> Void) {
 }
 
 MainActor.assumeIsolated {
+    // 只处理登录项开关，不进界面：`TokenNotch --login-item status|on|off`
+    if let code = LoginItemCommand.run() { exit(code) }
+
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate

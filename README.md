@@ -37,6 +37,7 @@
 - **Lines edited.** Every change counts `max(added, removed)` lines — `+1 −1` is 1, `+7 −5` and `+5 −7` are both 7. Overwriting a file counts only the lines that changed; scratch files and lock files are left out.
 - **Image-generation calls**, counted per model and image count.
 - **Cost estimates** from a built-in price table, overridable in `~/.tokens/pricing.json`.
+- **Launch at login.** A checkmark in the right-click menu (macOS `SMAppService`), so the notch is already tracking when the first agent starts. `scripts/install.sh` turns it on for you.
 - **English / 中文**, switchable from the right-click menu.
 - **Local only.** Reads agent logs on your Mac, writes its own SQLite database to `~/.tokens/tokens.db`. No network, no telemetry.
 
@@ -72,15 +73,17 @@ How an edit is counted:
 
 ## Install
 
-1. Download `TokenNotch-<version>.zip` from the [latest release](https://github.com/winbeau/token-notch/releases/latest) and unzip it.
-2. Move **TokenNotch.app** to `/Applications`.
-3. The app is ad-hoc signed, not notarized. On first launch macOS will refuse to open it; either right-click → **Open**, or clear the quarantine flag:
+The app is ad-hoc signed, not notarized, so macOS refuses the first launch. Clear the quarantine flag once — it is the step people forget:
 
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
-   ```
+```bash
+xattr -dr com.apple.quarantine "/Applications/TokenNotch.app"
+```
 
-The release also ships `tokens`, a command-line tool that imports the logs and prints the same statistics (handy for checking numbers).
+1. Download **TokenNotch-<version>.dmg** from the [latest release](https://github.com/winbeau/token-notch/releases/latest), open it, and drag **TokenNotch** into **Applications**.
+2. Run the line above once, or right-click → **Open** the first time instead.
+3. Launch at login is opt-in: right-click the notch → **开机自启 / Launch at login**. macOS lists it under **System Settings › General › Login Items & Extensions**, where you can turn it off again.
+
+Every release also attaches the same app as a `.zip`, plus `tokens`, a command-line tool that imports the logs and prints the same statistics (handy for checking numbers).
 
 ### Build from source
 
@@ -89,15 +92,18 @@ Requires Xcode 16+ (Swift 6) on macOS 14+.
 ```bash
 git clone https://github.com/winbeau/token-notch.git
 cd token-notch
-./scripts/build-app.sh          # → dist/TokenNotch.app and dist/tokens
-open dist/TokenNotch.app
+./scripts/install.sh            # → /Applications/TokenNotch.app, launched, launch at login on
+./scripts/build-app.sh          # → dist/TokenNotch.app and dist/tokens, without installing
+VERSION=0.3.2 ./scripts/release.sh  # → dist/*.dmg, *.zip and SHA256SUMS for a release
 swift test                      # parser, ingest, edit-count and migration tests
 ```
+
+`scripts/install.sh --no-login` installs without touching the login item, and `scripts/install.sh --uninstall` removes both. The login item points at the installed path, so enable it after the app sits where it will stay.
 
 ## Usage
 
 - Hover the notch to expand, move away to collapse.
-- Right-click the panel: **rebuild stats** (clear `~/.tokens` and re-import), **open `~/.tokens` in Finder**, **switch language**, **quit**.
+- Right-click the panel: **rebuild stats** (clear `~/.tokens` and re-import), **open `~/.tokens` in Finder**, **launch at login** (checkmark), **switch language**, **quit**.
 - `dist/tokens` prints every range, agent, model and project to the terminal.
 
 ### How the numbers are computed
@@ -131,7 +137,8 @@ Sources/TokenCore/     data layer: SQLite, log parsers, edit/image counting, zst
 Sources/TokenNotch/    the notch UI: window & hover zone, notch shape, wings, panel pages, strings
 Sources/TokensCLI/     the `tokens` command-line tool
 Tests/TokenCoreTests/  unit tests
-scripts/               build-app.sh, make-demo.sh
+scripts/               build-app.sh, install.sh (build + /Applications + launch at login),
+                       release.sh (DMG + zips + checksums), make-demo.sh
 ```
 
 ## Roadmap
@@ -139,7 +146,7 @@ scripts/               build-app.sh, make-demo.sh
 - [ ] Image-generation cost (by model and size)
 - [ ] Lines edited for Grok (no edit-tool logs to test against yet)
 - [ ] Hide while a full-screen app is in front
-- [ ] Launch at login (`SMAppService`)
+- [x] Launch at login (`SMAppService`)
 
 ## Acknowledgements
 

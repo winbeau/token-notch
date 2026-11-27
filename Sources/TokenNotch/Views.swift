@@ -80,6 +80,9 @@ struct ContextMenuItems: View {
         Button(t.menuSwitchLanguage) {
             withAnimation(.easeInOut(duration: 0.2)) { model.lang = model.lang == .zh ? .en : .zh }
         }
+        Toggle(t.menuLaunchAtLogin, isOn: Binding(
+            get: { LaunchAtLogin.isOn },
+            set: { on in (NSApp.delegate as? AppDelegate)?.setLaunchAtLogin(on) }))
         Divider()
         Button(t.menuQuit) { NSApp.terminate(nil) }
     }
